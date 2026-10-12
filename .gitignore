@@ -482,3 +482,6 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# 项目目录 Yaya.App 以 .App 结尾，会被上方 macOS 段的 *.app 规则整体忽略，特此抵消
+!**/Yaya.App/
