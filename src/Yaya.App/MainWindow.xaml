@@ -10,10 +10,10 @@
         <TextBlock Margin="0,8,0,0" FontSize="12" Foreground="Gray" TextWrapping="Wrap"
                    Text="我只采集前台窗口标题和键鼠空闲时间，数据全部存在本机，可随时从托盘菜单一键清空。" />
         <StackPanel Orientation="Horizontal" Margin="0,16,0,0" HorizontalAlignment="Left">
-            <Button Content="刚才其实在学习" Padding="10,4"
-                    Command="{Binding CorrectToFocusedCommand}" />
-            <Button Content="刚才其实在休息/玩" Padding="10,4" Margin="8,0,0,0"
-                    Command="{Binding CorrectToDistractedCommand}" />
+            <Button Content="刚才算有效" Padding="10,4"
+                    Command="{Binding MarkValidCommand}" />
+            <Button Content="逃避了，2分钟微重启" Padding="10,4" Margin="8,0,0,0"
+                    Command="{Binding MarkEscapeCommand}" />
         </StackPanel>
     </StackPanel>
 </Window>

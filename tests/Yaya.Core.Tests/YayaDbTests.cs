@@ -26,7 +26,8 @@ public class YayaDbTests : IDisposable
         using var db = CreateInitializedDb();
 
         db.RecordEvent(DateTimeOffset.UtcNow, AppCategory.Study, "session-1", FocusState.Focused, 0);
-        db.RecordCorrection(DateTimeOffset.UtcNow, FocusState.Distracted, FocusState.Focused, AppCategory.Study, "测试纠正");
+        db.RecordCorrection(DateTimeOffset.UtcNow, FocusState.Distracted, FocusState.Focused,
+            AppCategory.Study, UserCorrectionKind.CountAsValid, "测试纠正");
         var summary = DailySummaryComposer.Compose(120, 30, 1);
         db.SaveDailySummary(DateOnly.FromDateTime(DateTime.Today), 120, 30, 1, summary);
 
@@ -52,7 +53,8 @@ public class YayaDbTests : IDisposable
     {
         using var db = CreateInitializedDb();
         db.RecordEvent(DateTimeOffset.UtcNow, AppCategory.Entertainment, "session-1", FocusState.Distracted, 5);
-        db.RecordCorrection(DateTimeOffset.UtcNow, FocusState.Distracted, FocusState.Focused, AppCategory.Entertainment, null);
+        db.RecordCorrection(DateTimeOffset.UtcNow, FocusState.Distracted, FocusState.Focused,
+            AppCategory.Entertainment, UserCorrectionKind.Escape, null);
         db.SaveDailySummary(DateOnly.FromDateTime(DateTime.Today), 10, 10, 1, DailySummaryComposer.Compose(10, 10, 1));
 
         db.ClearAllData();

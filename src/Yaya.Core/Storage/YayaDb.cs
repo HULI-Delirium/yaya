@@ -29,6 +29,7 @@ public sealed class YayaDb : IDisposable
             timestamp_utc   TEXT    NOT NULL,
             original_state  TEXT    NOT NULL,
             corrected_state TEXT    NOT NULL,
+            kind            TEXT    NOT NULL,   -- CountAsValid / Escape（UserCorrectionKind）
             app_category    TEXT    NOT NULL,
             note            TEXT
         );
@@ -77,18 +78,19 @@ public sealed class YayaDb : IDisposable
         command.ExecuteNonQuery();
     }
 
-    /// <summary>记录一条用户纠正（产品红线：用户可纠正）。</summary>
-    public void RecordCorrection(DateTimeOffset atUtc, FocusState original, FocusState corrected, AppCategory category, string? note)
+    /// <summary>记录一条用户纠正（产品红线：用户可纠正），kind 区分“算有效/逃避”。</summary>
+    public void RecordCorrection(DateTimeOffset atUtc, FocusState original, FocusState corrected, AppCategory category, UserCorrectionKind kind, string? note)
     {
         const string sql = """
-            INSERT INTO corrections (timestamp_utc, original_state, corrected_state, app_category, note)
-            VALUES ($ts, $orig, $corr, $cat, $note);
+            INSERT INTO corrections (timestamp_utc, original_state, corrected_state, kind, app_category, note)
+            VALUES ($ts, $orig, $corr, $kind, $cat, $note);
             """;
 
         using var command = new SqliteCommand(sql, _connection);
         command.Parameters.AddWithValue("$ts", atUtc.ToString("O"));
         command.Parameters.AddWithValue("$orig", original.ToString());
         command.Parameters.AddWithValue("$corr", corrected.ToString());
+        command.Parameters.AddWithValue("$kind", kind.ToString());
         command.Parameters.AddWithValue("$cat", category.ToString());
         command.Parameters.AddWithValue("$note", note is null ? DBNull.Value : note);
         command.ExecuteNonQuery();

@@ -49,7 +49,9 @@ public partial class App : Application
             Log.Information("托盘图标已加载（内嵌占位图标）");
 
             MonitoringLoop loop = null!;
-            _viewModel = new MainViewModel((state, note) => loop.ReportUserCorrection(state, note));
+            _viewModel = new MainViewModel(
+                note => loop.ReportValid(note),
+                note => loop.ReportEscape(note));
             loop = new MonitoringLoop(_db, _viewModel, OnNudge);
             _loop = loop;
 
