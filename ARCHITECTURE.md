@@ -14,7 +14,7 @@
         ┌──────────────────────────────────────────┐
         │               Yaya.Core                  │
         │  纯 C#，TargetFramework=net8.0            │
-        │  Monitoring: 三态状态机 / 标题分类器 / 阈值 │
+        │  Monitoring: 三态状态机 / 标题分类器 / 选项 │
         │  Storage:    YayaDb（Microsoft.Data.Sqlite）│
         │  Services:   DailySummaryComposer        │
         └──────────────────────────────────────────┘
@@ -33,36 +33,43 @@ Core 的任何行为变更必须伴随 `Yaya.Core.Tests` 中的单元测试。
 
 **不截屏、不读摄像头、不读麦克风。** 分类只用标题关键词（`AppCategoryClassifier`），数据只写本机 SQLite。
 
-## 3. 三态状态机（`FocusStateMachine`，纯逻辑可单测）
+## 3. 三态状态机（`FocusStateMachine` v2，纯逻辑可单测）
 
 状态：`Focused`（有效学习） / `Distracted`（游离） / `Uncertain`（不确定）。
+输入：`Observation(AppCategory 类别, long 空闲毫秒数, PomodoroPhase 番茄钟相位)`——Core 只消费抽象信号，不认识具体窗口；时钟使用注入的 `TimeProvider`（测试拨 FakeClock，无 Thread.Sleep）。
 
-| 输入样本 | 判定 | 置信度 |
-| --- | --- | --- |
-| 键鼠空闲 ≥ `IdleThresholdSeconds` | Distracted | 1.0 |
-| 标题类别 = Study / Work | Focused | 0.9 |
-| 标题类别 = Entertainment / Social | Distracted | 0.9 |
-| 其他（含空标题） | Uncertain | 0.3 |
+判定决策表（`Evaluate` 内按序先命中先生效）：
 
-**打扰门控（产品红线：低打扰）**——`ShouldNotify` 仅当同时满足：
-1. 本轮**新进入** Distracted（状态未变不重复提醒）；
-2. `置信度 ≥ NotifyMinConfidence`（低置信度绝不打扰）；
-3. 距上次提醒超过 `NudgeCooldownMinutes`（防连环弹窗）。
+| # | 条件 | 判定 | 询问 |
+| --- | --- | --- | --- |
+| R1 | 微重启窗口内 | Uncertain | 不询问 |
+| R2 | 前台类别刚切换 < 宽限期 | Uncertain（防 Alt-Tab 路过误判） | 不询问 |
+| R3 | Study / Work 且空闲 < 阈值 | Focused | 不询问 |
+| R4 | Entertainment / Social 且相位 ≠ Break | Distracted | 新进入时询问* |
+| R5 | Study / Work 且空闲 ≥ 阈值（信号冲突） | Uncertain | 不询问 |
+| R6 | Break 相位 + 娱乐/社交（合法休息） | Uncertain | 不询问 |
+| R7 | 其他（Unknown 等信号不足） | Uncertain | 不询问 |
 
-打扰形式为托盘气泡，频率与语气以"同伴轻拍"为标准。**用户可纠正**（主窗体按钮或托盘）：纠正写入 `corrections` 表并即时重置当前状态。
+* 询问门控：`ShouldNudge` 仅当「新进入 Distracted」∧「同类询问距上次 ≥ NudgeCooldownMinutes」。
+产品红线"低置信度不打扰" = Uncertain 永不询问 + 微重启窗口静默。v2 起不再使用数值置信度，低置信由 Uncertain 表达。
 
-### 阈值常量（全部占位，标 TODO 待校准）
-
-集中在 `Monitoring/MonitoringThresholds.cs`：
+阈值全部集中在 `FocusStateMachineOptions`（可配置，set 时校验 > 0，非法值立即抛异常）：
 
 ```csharp
-public const double SampleIntervalSeconds = 5;      // TODO(校准)：采样间隔
-public const double IdleThresholdSeconds  = 120;    // TODO(校准)：空闲阈值
-public const double NotifyMinConfidence   = 0.75;   // TODO(校准)：打扰最低置信度
-public const double NudgeCooldownMinutes  = 20;     // TODO(校准)：打扰冷却
+IdleThresholdMilliseconds       = 120_000   // TODO(校准)：空闲阈值（学习窗口超时视为冲突）
+CategorySwitchGraceMilliseconds = 8_000     // TODO(校准)：前台切换宽限期
+NudgeCooldownMinutes            = 10        // TODO(校准)：同类询问冷却
+MicroRestartMinutes             = 2         // TODO(校准)：逃避后的微重启窗口
 ```
 
-校准流程：改常量 → `dotnet test` 全绿 → 真实场景观察一周 → 提交（conventional commits）。
+校准流程：改默认值或注入新 Options → `dotnet test` 全绿 → 真实场景观察一周 → 提交（conventional commits）。
+
+用户纠正（均返回 `CorrectionRecord` 纯数据，由调用方落库 corrections 表，状态机保持零 IO）：
+
+- `MarkAsValid`（刚才算有效）→ 回退 `Focused`，并结束微重启窗口；
+- `MarkEscape`（逃避）→ 进入微重启窗口（`InMicroRestart` 可供 UI 显示"重新开始"），窗口内不询问。
+
+输出：`Evaluate` 返回 `FocusTransition(From, To, ShouldNudge, NudgeKind?)`；`StateChanged` 事件供 UI 播放动画。
 
 ## 4. SQLite 三张表（草案 v1）
 
@@ -85,7 +92,8 @@ CREATE TABLE IF NOT EXISTS corrections (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp_utc   TEXT    NOT NULL,
     original_state  TEXT    NOT NULL,   -- 芽芽的原判断
-    corrected_state TEXT    NOT NULL,   -- 用户纠正后的状态
+    corrected_state TEXT    NOT NULL,   -- 纠正后的状态
+    kind            TEXT    NOT NULL,   -- CountAsValid / Escape（UserCorrectionKind）
     app_category    TEXT    NOT NULL,   -- 被纠正时的标题类别
     note            TEXT                -- 用户备注（可空）
 );
@@ -113,7 +121,8 @@ CREATE TABLE IF NOT EXISTS daily_summary (
 
 ## 6. 已知取舍与 TODO
 
-- 无状态滞回（防抖），v1 靠采样间隔与冷却兜底；TODO：连续 N 次一致样本才迁移。
+- 前台切换宽限期已实现（`CategorySwitchGraceMilliseconds`）；连续 N 次一致样本才迁移的状态滞回仍是 TODO。
 - 分类关键词表为占位；TODO：用户自定义词表 + 从 corrections 学习。
+- 番茄钟相位已进入决策表（R6），但 App 侧番茄钟尚未接入，v1 恒传 `None`；TODO(app)。
 - 每日复盘生成时机（关窗/23:59/次日首次启动）待产品定；TODO。
 - App 单进程单 UI 线程写库；若未来加后台服务再引入锁/WAL。

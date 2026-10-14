@@ -7,7 +7,7 @@
 | 命名空间 / 类 / 公开成员 | PascalCase，与文件同名 | `FocusStateMachine.cs` → `class FocusStateMachine` |
 | 私有字段 | `_camelCase` | `private DateTimeOffset? _lastNotifiedAt;` |
 | 接口 | `I` 前缀 | `IProbe`（如未来引入） |
-| 常量 | PascalCase，见名知义 | `NotifyMinConfidence` |
+| 常量 | PascalCase，见名知义 | `IdleThresholdMilliseconds` |
 | 测试类 | `<被测类>Tests` | `FocusStateMachineTests` |
 | 测试方法 | `被测方法_场景_预期`（中文允许） | `Evaluate_冷却期内再次游离_不打扰` |
 
@@ -31,9 +31,9 @@ scope：`core` / `app` / `tests` / `db` / `build` / `docs`
 示例：
 
 ```
-feat(core): 新增三态状态机与置信度打扰门控
+feat(core): 新增三态状态机与规则决策表
 fix(app): 托盘菜单一键清空后补记审计日志
-test(core): 补充低置信度不打扰与冷却恢复用例
+test(core): 补充低置信不打扰与冷却恢复用例
 docs(architecture): 同步 daily_summary 表结构变更
 ```
 
