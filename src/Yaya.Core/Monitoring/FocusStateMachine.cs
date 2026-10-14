@@ -5,7 +5,7 @@ namespace Yaya.Core.Monitoring;
 /// 判定规则按序先命中先生效（完整表见 ARCHITECTURE.md 第 3 节）：
 ///   R1 微重启窗口内 → Uncertain 且不询问；
 ///   R2 前台类别刚切换 &lt; 宽限期 → Uncertain（防 Alt-Tab 路过误判）；
-///   R3 学习类（Study/Work）且空闲 &lt; 阈值 → Focused；
+///   R3 学习类（Study/Utility）且空闲 &lt; 阈值 → Focused；
 ///   R4 娱乐/社交且番茄钟非休息段 → Distracted（新进入时询问，同类 10 分钟冷却）；
 ///   R5 学习类但空闲 ≥ 阈值（信号冲突）→ Uncertain；
 ///   R6 休息段 + 娱乐/社交（合法休息）→ Uncertain；
@@ -115,8 +115,8 @@ public sealed class FocusStateMachine
             return FocusState.Uncertain;
         }
 
-        // R3 / R5：学习类按空闲阈值二分支
-        if (sample.Category is AppCategory.Study or AppCategory.Work)
+        // R3 / R5：学习类（含工具）按空闲阈值二分支
+        if (sample.Category is AppCategory.Study or AppCategory.Utility)
         {
             return sample.IdleMilliseconds < _options.IdleThresholdMilliseconds
                 ? FocusState.Focused

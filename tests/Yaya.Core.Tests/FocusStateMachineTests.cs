@@ -42,11 +42,11 @@ public class FocusStateMachineTests
     }
 
     [Fact]
-    public void Evaluate_Work类别_视同学习类转入有效学习()
+    public void Evaluate_Utility类别_视同学习类转入有效学习()
     {
         var machine = CreateMachine(new FakeClock());
 
-        var t = machine.Evaluate(new Observation(AppCategory.Work, 0));
+        var t = machine.Evaluate(new Observation(AppCategory.Utility, 0));
 
         Assert.Equal(FocusState.Focused, t.To);
     }
