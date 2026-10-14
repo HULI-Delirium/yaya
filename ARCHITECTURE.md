@@ -6,7 +6,7 @@
 ┌─────────────────────────┐         ┌──────────────────────────┐
 │       Yaya.App          │         │     Yaya.Core.Tests      │
 │  WPF / 托盘 / 主窗口     │         │  xUnit，仅引用 Core       │
-│  感知循环（DispatcherTimer│         │  状态机 / 分类器 / DB /   │
+│  采集循环（DispatcherTimer│         │  状态机 / 映射表 / DB /   │
 │  + Win32 只读采集）       │         │  复盘文案 的行为契约测试   │
 └───────────┬─────────────┘         └───────────┬──────────────┘
             │ 项目引用                           │ 项目引用
@@ -14,7 +14,7 @@
         ┌──────────────────────────────────────────┐
         │               Yaya.Core                  │
         │  纯 C#，TargetFramework=net8.0            │
-        │  Monitoring: 三态状态机 / 标题分类器 / 选项 │
+        │  Monitoring: 三态状态机 / 进程名映射 / 选项 │
         │  Storage:    YayaDb（Microsoft.Data.Sqlite）│
         │  Services:   DailySummaryComposer        │
         └──────────────────────────────────────────┘
@@ -29,9 +29,10 @@ Core 的任何行为变更必须伴随 `Yaya.Core.Tests` 中的单元测试。
 | 采集 | 方式 | 说明 |
 | --- | --- | --- |
 | 前台窗口标题 | `GetForegroundWindow` + `GetWindowText`（只读） | 不读 URL、不读进程路径、不枚举窗口内容 |
+| 前台进程名 | `GetWindowThreadProcessId` → `Process.ProcessName`（只读元数据） | 仅用于类别映射，不枚举进程、不读模块/路径 |
 | 键鼠空闲时长 | `GetLastInputInfo` 系统级计数差 | 不记录按键内容、不装键盘钩子 |
 
-**不截屏、不读摄像头、不读麦克风。** 分类只用标题关键词（`AppCategoryClassifier`），数据只写本机 SQLite。
+**不截屏、不读摄像头、不读麦克风。** 分类用进程名映射（`AppCatalog`），浏览器等宿主进程退回标题关键词兜底；数据只写本机 SQLite。
 
 ## 3. 三态状态机（`FocusStateMachine` v2，纯逻辑可单测）
 
@@ -44,9 +45,9 @@ Core 的任何行为变更必须伴随 `Yaya.Core.Tests` 中的单元测试。
 | --- | --- | --- | --- |
 | R1 | 微重启窗口内 | Uncertain | 不询问 |
 | R2 | 前台类别刚切换 < 宽限期 | Uncertain（防 Alt-Tab 路过误判） | 不询问 |
-| R3 | Study / Work 且空闲 < 阈值 | Focused | 不询问 |
+| R3 | Study / Utility 且空闲 < 阈值 | Focused | 不询问 |
 | R4 | Entertainment / Social 且相位 ≠ Break | Distracted | 新进入时询问* |
-| R5 | Study / Work 且空闲 ≥ 阈值（信号冲突） | Uncertain | 不询问 |
+| R5 | Study / Utility 且空闲 ≥ 阈值（信号冲突） | Uncertain | 不询问 |
 | R6 | Break 相位 + 娱乐/社交（合法休息） | Uncertain | 不询问 |
 | R7 | 其他（Unknown 等信号不足） | Uncertain | 不询问 |
 
@@ -80,7 +81,7 @@ MicroRestartMinutes             = 2         // TODO(校准)：逃避后的微重
 CREATE TABLE IF NOT EXISTS events (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp_utc TEXT    NOT NULL,     -- 观测时刻（ISO 8601 UTC）
-    app_category  TEXT    NOT NULL,     -- Study / Work / Entertainment / Social / Unknown
+    app_category  TEXT    NOT NULL,     -- Study / Utility / Entertainment / Social / Unknown
     session_id    TEXT    NOT NULL,     -- 本次应用运行的会话 ID
     state         TEXT    NOT NULL,     -- 该时刻状态机状态
     idle_seconds  REAL    NOT NULL      -- 当时键鼠空闲秒数
@@ -119,10 +120,14 @@ CREATE TABLE IF NOT EXISTS daily_summary (
 
 单测硬约束：任意输入输出必须恰好含 3 个「。」。
 
-## 6. 已知取舍与 TODO
+## 6. 资源红线与已知取舍
+
+资源红线（实测验收见交付清单）：常驻内存 ≤ 300MB、CPU ≤ 2%。达标设计：
+采集循环为 2 秒一次的 DispatcherTimer（UI 线程），单轮仅数次 µs 级 P/Invoke + 字典查找 + 状态机求值；
+events/corrections 只在状态迁移与纠正时写入（稳态零 I/O）；无增长型内存缓存；`MonitoringLoop.Dispose` 停表退订，App 退出依序释放。
 
 - 前台切换宽限期已实现（`CategorySwitchGraceMilliseconds`）；连续 N 次一致样本才迁移的状态滞回仍是 TODO。
-- 分类关键词表为占位；TODO：用户自定义词表 + 从 corrections 学习。
+- 进程名映射表与浏览器标题兜底已实现（`AppCatalog`）；词表为占位，TODO：用户自定义词表 + 从 corrections 学习。
 - 番茄钟相位已进入决策表（R6），但 App 侧番茄钟尚未接入，v1 恒传 `None`；TODO(app)。
 - 每日复盘生成时机（关窗/23:59/次日首次启动）待产品定；TODO。
-- App 单进程单 UI 线程写库；若未来加后台服务再引入锁/WAL。
+- App 单进程单 UI 线程写库；若未来 tick 变重或加后台服务，再评估 PeriodicTimer + WAL。
