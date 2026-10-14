@@ -72,7 +72,8 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
-        _loop?.Stop();
+        // 依序释放：停轮询与退订事件 → 托盘 → 数据库 → 冲刷日志
+        _loop?.Dispose();
         _trayIcon?.Dispose();
         _db?.Dispose();
         Log.Information("芽芽退出");

@@ -21,6 +21,10 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     private static extern bool GetLastInputInfo(ref LASTINPUTINFO plii);
 
+    // 由前台窗口句柄反查所属进程 ID（只读元数据，配合 ProcessName 用于类别映射）
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
     [StructLayout(LayoutKind.Sequential)]
     private struct LASTINPUTINFO
     {
@@ -46,6 +50,41 @@ internal static class NativeMethods
         var builder = new StringBuilder(length + 1);
         _ = GetWindowText(handle, builder, builder.Capacity);
         return builder.ToString();
+    }
+
+    /// <summary>取前台窗口所属进程名；句柄失效或进程刚好退出等任何异常都返回空串（判 Unknown，不崩）。</summary>
+    public static string GetForegroundProcessName()
+    {
+        var handle = GetForegroundWindow();
+        if (handle == IntPtr.Zero)
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            _ = GetWindowThreadProcessId(handle, out var processId);
+            if (processId == 0)
+            {
+                return string.Empty;
+            }
+
+            // Process 对象必须 Dispose；进程在两步调用之间退出时此处会抛异常，按空串降级
+            using var process = System.Diagnostics.Process.GetProcessById((int)processId);
+            return process.ProcessName;
+        }
+        catch (ArgumentException)
+        {
+            return string.Empty;
+        }
+        catch (InvalidOperationException)
+        {
+            return string.Empty;
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            return string.Empty;
+        }
     }
 
     /// <summary>距上次键鼠输入的空闲秒数。用 uint 换算避免 24.9 天回绕误差。</summary>
