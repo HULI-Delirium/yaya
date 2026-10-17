@@ -15,6 +15,13 @@
     <EmbeddedResource Include="Assets\tray.ico" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- 宠物图：Content 复制到输出目录，运行时按相对路径加载；
+         美术交付后直接替换发布目录里的 PNG 即可，无需重新编译（换图不改代码） -->
+    <Content Include="Assets\pet\*.png" />
+    <Content Include="Assets\pet\README.txt" />
+  </ItemGroup>
+
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
