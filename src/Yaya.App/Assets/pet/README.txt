@@ -16,3 +16,20 @@
   - 六张图的角色轮廓在画面中的位置尽量一致，避免切换时跳动。
 
 换图不改代码：替换本目录（或发布目录 Assets\pet\）下的同名文件即可。
+
+
+开发调试（默认关闭）
+
+宠物窗 F6–F9 调试热键由条件编译符号 DEBUG_HOTKEYS 控制，默认构建不包含。
+开启方式（二选一）：
+
+  1. 在 src/Yaya.App/Yaya.App.csproj 的 PropertyGroup 中加一行：
+       <DefineConstants>$(DefineConstants);DEBUG_HOTKEYS</DefineConstants>
+  2. 临时整行命令构建：
+       dotnet build -p:DefineConstants="DEBUG;TRACE;DEBUG_HOTKEYS"
+
+热键（需先点一下宠物窗获取键盘焦点）：
+  F6 模拟回到学习（Healthy）   F7 模拟游离（Wilted）
+  F8 模拟"有效查资料"（Bloom） F9 模拟"在逃避"（Weeds）
+
+正式发布前应在 csproj 中移除该符号（见 PetWindow.xaml.cs 顶部注释）。

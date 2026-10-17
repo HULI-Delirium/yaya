@@ -34,6 +34,11 @@ public partial class PetWindow : Window
                 DragMove();
             }
         };
+
+#if DEBUG_HOTKEYS
+        // 调试热键默认不编译进正式构建（符号开启方式见 Assets/pet/README.txt）
+        KeyDown += OnDevKeyDown;
+#endif
     }
 
     /// <summary>鼠标穿透开关：开启后宠物窗不拦截鼠标消息（也不可拖动）。</summary>
@@ -81,7 +86,9 @@ public partial class PetWindow : Window
     private void ApplyState(string stateName) =>
         VisualStateManager.GoToElementState(PetRoot, stateName, true);
 
-    // 开发期调试热键（冒烟验收用，TODO(app): 发布前移除）：F6 模拟 Focused，F7 模拟 Distracted
+    // 开发期调试热键（冒烟验收用）：F6 模拟 Focused，F7 模拟 Distracted，
+    // F8 模拟"有效查资料"，F9 模拟"在逃避"。仅在定义了 DEBUG_HOTKEYS 时编译。
+#if DEBUG_HOTKEYS
     private void OnDevKeyDown(object sender, KeyEventArgs e)
     {
         switch (e.Key)
@@ -100,4 +107,5 @@ public partial class PetWindow : Window
                 break;
         }
     }
+#endif
 }
