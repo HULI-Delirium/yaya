@@ -3,10 +3,9 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="芽芽" Width="200" Height="360"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent"
-        Topmost="True" ShowInTaskbar="False" ResizeMode="NoResize"
-        KeyDown="OnDevKeyDown">
+        Topmost="True" ShowInTaskbar="False" ResizeMode="NoResize">
     <Window.Resources>
-        <!-- 待机呼吸：常驻循环，Loaded 时由代码启动；锚点 0.5,1.0（盆底） -->
+        <!-- 待机呼吸：常驻循环，Loaded 时由代码启动；锚点 0.5,0.751（真图实测盆底） -->
         <Storyboard x:Key="BreathingStoryboard">
             <DoubleAnimation Storyboard.TargetName="PetScale" Storyboard.TargetProperty="ScaleX"
                              From="1" To="1.03" Duration="0:0:1.5" AutoReverse="True" RepeatBehavior="Forever"/>
@@ -19,7 +18,7 @@
     <Grid Width="200" Height="360">
         <!-- 宠物区：三层变换（倾倒/摇摆/呼吸）同以盆底中点为锚；拖动也只由本区触发 -->
         <Grid x:Name="PetRoot" Width="200" Height="200" VerticalAlignment="Bottom"
-              RenderTransformOrigin="0.5,1.0">
+              RenderTransformOrigin="0.5,0.751">
             <VisualStateManager.VisualStateGroups>
                 <!-- 姿态组：持久互斥；迁移动画全部写在 VisualTransition 里 -->
                 <VisualStateGroup x:Name="PostureStates">
@@ -109,13 +108,13 @@
             </Grid.RenderTransform>
 
             <!-- 心情摇摆层：Calm ±2° / Alert 0°；独立变换，避免与倾倒角互相覆盖 -->
-            <Grid x:Name="PetSwayHost" Width="200" Height="200" RenderTransformOrigin="0.5,1.0">
+            <Grid x:Name="PetSwayHost" Width="200" Height="200" RenderTransformOrigin="0.5,0.751">
                 <Grid.RenderTransform>
                     <RotateTransform x:Name="PetSway"/>
                 </Grid.RenderTransform>
 
                 <!-- 呼吸缩放层：1.0 ↔ 1.03 -->
-                <Grid x:Name="PetBreathHost" Width="200" Height="200" RenderTransformOrigin="0.5,1.0">
+                <Grid x:Name="PetBreathHost" Width="200" Height="200" RenderTransformOrigin="0.5,0.751">
                     <Grid.RenderTransform>
                         <ScaleTransform x:Name="PetScale"/>
                     </Grid.RenderTransform>

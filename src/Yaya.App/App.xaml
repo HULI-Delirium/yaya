@@ -10,14 +10,22 @@
         <DrawingImage x:Key="PetPlaceholderImage">
             <DrawingImage.Drawing>
                 <DrawingGroup>
+                    <!-- 透明满幅底：把 DrawingGroup 边界钉在 200x200 画布，
+                         与真图（1024 均匀缩放到 200）共用同一坐标系，缺图回退切换时不跳动；
+                         盆底置于 y=150（75%），与真图实测锚点 0.751 对齐 -->
+                    <GeometryDrawing Brush="#00FFFFFF">
+                        <GeometryDrawing.Geometry>
+                            <RectangleGeometry Rect="0,0,200,200"/>
+                        </GeometryDrawing.Geometry>
+                    </GeometryDrawing>
                     <GeometryDrawing Brush="#FF7CB342">
                         <GeometryDrawing.Geometry>
-                            <EllipseGeometry Center="100,112" RadiusX="26" RadiusY="44"/>
+                            <EllipseGeometry Center="100,108" RadiusX="24" RadiusY="40"/>
                         </GeometryDrawing.Geometry>
                     </GeometryDrawing>
                     <GeometryDrawing Brush="#FF8D6E63">
                         <GeometryDrawing.Geometry>
-                            <RectangleGeometry Rect="56,148,88,44" RadiusX="6" RadiusY="6"/>
+                            <RectangleGeometry Rect="60,112,80,38" RadiusX="6" RadiusY="6"/>
                         </GeometryDrawing.Geometry>
                     </GeometryDrawing>
                 </DrawingGroup>

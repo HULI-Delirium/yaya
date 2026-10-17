@@ -25,6 +25,10 @@ public sealed class PetAssets
         }
 
         _images = images;
+        // 联调验收用的正向证明：真图几张、占位几张一目了然
+        var realCount = images.Values.Count(image => !ReferenceEquals(image, placeholder));
+        Log.Information("宠物图加载完成：真图 {RealCount}/{Total}，占位 {PlaceholderCount}",
+            realCount, images.Count, images.Count - realCount);
     }
 
     /// <summary>按视觉状态取图；返回值永不为空（缺失时已回退占位图）。</summary>
