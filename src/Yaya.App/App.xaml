@@ -4,15 +4,35 @@
              xmlns:tb="http://www.hardcodet.net/taskbar"
              ShutdownMode="OnExplicitShutdown">
     <!-- 系统托盘图标：图标内容由代码从内嵌资源加载，不依赖外部文件 -->
+    <!-- 缺图回退的矢量占位：简笔花盆，以 200x200 坐标设计，底边中点为锚点。
+         放在应用级资源：PetAssets 在宠物窗创建前就要能取到 -->
     <Application.Resources>
+        <DrawingImage x:Key="PetPlaceholderImage">
+            <DrawingImage.Drawing>
+                <DrawingGroup>
+                    <GeometryDrawing Brush="#FF7CB342">
+                        <GeometryDrawing.Geometry>
+                            <EllipseGeometry Center="100,112" RadiusX="26" RadiusY="44"/>
+                        </GeometryDrawing.Geometry>
+                    </GeometryDrawing>
+                    <GeometryDrawing Brush="#FF8D6E63">
+                        <GeometryDrawing.Geometry>
+                            <RectangleGeometry Rect="56,148,88,44" RadiusX="6" RadiusY="6"/>
+                        </GeometryDrawing.Geometry>
+                    </GeometryDrawing>
+                </DrawingGroup>
+            </DrawingImage.Drawing>
+        </DrawingImage>
+
         <tb:TaskbarIcon x:Key="TrayIcon"
                         ToolTipText="芽芽 · 学习节律陪伴"
                         MenuActivation="LeftOrRightClick">
             <tb:TaskbarIcon.ContextMenu>
                 <ContextMenu>
-                    <MenuItem Header="打开主窗口" Click="TrayMenuShowMainWindow" />
-                    <MenuItem Header="一键清空本地数据" Click="TrayMenuClearData" />
+                    <MenuItem x:Name="TrayToggleMonitoringItem" Header="暂停采集" Click="TrayMenuToggleMonitoring" />
+                    <MenuItem Header="设置…" Click="TrayMenuShowSettings" />
                     <Separator />
+                    <MenuItem Header="一键清空本地数据" Click="TrayMenuClearData" />
                     <MenuItem Header="退出" Click="TrayMenuExit" />
                 </ContextMenu>
             </tb:TaskbarIcon.ContextMenu>

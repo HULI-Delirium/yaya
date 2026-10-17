@@ -8,9 +8,10 @@ namespace Yaya.App.Services;
 
 /// <summary>
 /// 行为采集与感知循环（后台轮询，默认每 2 秒一次）：
-/// 每轮读取“前台进程名 + 窗口标题 + 键鼠空闲时长”，交给 Core 层状态机判定，
-/// 状态迁移时写 Serilog 日志与 events 表，允许打扰时回调提醒。
-/// 运行在 UI 线程（DispatcherTimer）：单轮是微秒级工作，无需后台线程与锁。
+/// 每轮读取“前台进程名 + 窗口标题 + 键鼠空闲时长”，交给 Core 层状态机判定；
+/// 状态迁移时写 Serilog 与 events 表并抛出 FocusTransitionOccurred；
+/// Core 允许询问时抛出 NudgeRequested（提醒总开关的过滤在订阅方，不影响冷却计数）。
+/// 运行在 UI 线程（DispatcherTimer）：单轮微秒级工作，无需后台线程与锁。
 /// </summary>
 public sealed class MonitoringLoop : IDisposable
 {
@@ -19,22 +20,27 @@ public sealed class MonitoringLoop : IDisposable
 
     private readonly YayaDb _db;
     private readonly MainViewModel _viewModel;
-    private readonly Action<string> _onNudge;
     private readonly DispatcherTimer _timer;
     private readonly FocusStateMachine _machine;
+    private bool _timerRunning;
     private bool _disposed;
 
     // 会话 ID：每次应用启动生成一个，串联当次运行产生的全部 events
     private readonly string _sessionId = Guid.NewGuid().ToString("N");
     private AppCategory _lastCategory = AppCategory.Unknown;
 
-    public MonitoringLoop(YayaDb db, MainViewModel viewModel, Action<string> onNudge)
+    /// <summary>状态迁移事件（宠物窗动画/设置页挂接）。</summary>
+    public event EventHandler<FocusTransition>? FocusTransitionOccurred;
+
+    /// <summary>Core 判定应询问时抛出；是否展示由订阅方按提醒开关决定。</summary>
+    public event EventHandler? NudgeRequested;
+
+    public MonitoringLoop(YayaDb db, MainViewModel viewModel)
     {
         _db = db;
         _viewModel = viewModel;
-        _onNudge = onNudge;
         _machine = new FocusStateMachine();
-        _machine.StateChanged += OnStateChanged;
+        _machine.StateChanged += OnMachineStateChanged;
         _timer = new DispatcherTimer
         {
             Interval = TimeSpan.FromSeconds(SampleIntervalSeconds),
@@ -44,9 +50,27 @@ public sealed class MonitoringLoop : IDisposable
 
     public void Start()
     {
+        if (_timerRunning)
+        {
+            return;
+        }
+
+        _timerRunning = true;
         Log.Information("感知循环启动：间隔 {Interval}s，会话 {SessionId}", SampleIntervalSeconds, _sessionId);
         _timer.Start();
         Tick();   // 冷启动立即采一轮，不等首个 2 秒
+    }
+
+    public void Stop()
+    {
+        if (!_timerRunning)
+        {
+            return;
+        }
+
+        _timerRunning = false;
+        _timer.Stop();
+        Log.Information("感知循环已暂停");
     }
 
     /// <summary>用户纠正“刚才算有效”：回退状态并把纠正记录落库。</summary>
@@ -64,13 +88,12 @@ public sealed class MonitoringLoop : IDisposable
         }
 
         _disposed = true;
-        _timer.Stop();
-        _machine.StateChanged -= OnStateChanged;
+        Stop();
+        _machine.StateChanged -= OnMachineStateChanged;
     }
 
-    private void OnStateChanged(object? sender, FocusTransition transition)
+    private void OnMachineStateChanged(object? sender, FocusTransition transition)
     {
-        // 状态迁移事件：v1 先落日志，主窗体动画在此挂接（TODO(app)）
         Log.Information("状态迁移事件 {From} -> {To}", transition.From, transition.To);
     }
 
@@ -109,6 +132,7 @@ public sealed class MonitoringLoop : IDisposable
                     transition.From, transition.To, category, idleMilliseconds);
                 // 进程名与标题只进本地日志，用于校准映射词表（红线：不进提醒气泡）
                 Log.Debug("迁移上下文：进程 {ProcessName}，标题“{Title}”", processName, title);
+                FocusTransitionOccurred?.Invoke(this, transition);
             }
 
             _viewModel.StatusText = transition.To switch
@@ -118,10 +142,11 @@ public sealed class MonitoringLoop : IDisposable
                 _ => "让我再看看……",
             };
 
-            // ③ 询问门控由状态机内部完成（冷却/宽限/微重启），这里只消费结果
+            // ③ 询问门控由状态机内部完成（冷却/宽限/微重启），这里只转发结果
             if (transition.ShouldNudge)
             {
-                _onNudge("检测到你可能在游离，要回到学习吗？");
+                Log.Information("低打扰询问已触发（同类冷却由 Core 保证）");
+                NudgeRequested?.Invoke(this, EventArgs.Empty);
             }
         }
         catch (Exception ex)

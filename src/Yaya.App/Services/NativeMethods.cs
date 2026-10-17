@@ -99,4 +99,23 @@ internal static class NativeMethods
         var idleMs = (uint)Environment.TickCount - info.dwTime;
         return idleMs / 1000.0;
     }
+
+    // 鼠标穿透：给窗口扩展样式加/去 WS_EX_TRANSPARENT，使鼠标消息落到下层窗口
+    private const int GwlExStyle = -20;
+    private const long WsExTransparent = 0x00000020L;
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+    private static extern long GetWindowLongPtr(IntPtr hWnd, int nIndex);
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
+    private static extern long SetWindowLongPtr(IntPtr hWnd, int nIndex, long dwNewLong);
+
+    /// <summary>宠物窗鼠标穿透开关；需在窗口句柄创建后调用（Loaded/Show 之后）。</summary>
+    public static void SetClickThrough(System.Windows.Window window, bool enabled)
+    {
+        var handle = new System.Windows.Interop.WindowInteropHelper(window).Handle;
+        var style = GetWindowLongPtr(handle, GwlExStyle);
+        _ = SetWindowLongPtr(handle, GwlExStyle,
+            enabled ? style | WsExTransparent : style & ~WsExTransparent);
+    }
 }
