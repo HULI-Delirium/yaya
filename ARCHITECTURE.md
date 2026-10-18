@@ -5,9 +5,9 @@
 ```
 ┌─────────────────────────┐         ┌──────────────────────────┐
 │       Yaya.App          │         │     Yaya.Core.Tests      │
-│  WPF / 托盘 / 主窗口     │         │  xUnit，仅引用 Core       │
-│  采集循环（DispatcherTimer│         │  状态机 / 映射表 / DB /   │
-│  + Win32 只读采集）       │         │  复盘文案 的行为契约测试   │
+│  WPF / 托盘 / 宠物窗     │         │  xUnit，仅引用 Core       │
+│  采集循环 + 番茄钟服务    │         │  状态机 / 映射表 / 聚合 / │
+│  （DispatcherTimer）     │         │  DB 的行为契约测试        │
 └───────────┬─────────────┘         └───────────┬──────────────┘
             │ 项目引用                           │ 项目引用
             ▼                                   ▼
@@ -16,7 +16,7 @@
         │  纯 C#，TargetFramework=net8.0            │
         │  Monitoring: 三态状态机 / 进程名映射 / 选项 │
         │  Storage:    YayaDb（Microsoft.Data.Sqlite）│
-        │  Services:   DailySummaryComposer        │
+        │  Services:   复盘聚合器 / IReportWriter   │
         └──────────────────────────────────────────┘
 ```
 
@@ -54,6 +54,8 @@ Core 的任何行为变更必须伴随 `Yaya.Core.Tests` 中的单元测试。
 * 询问门控：`ShouldNudge` 仅当「新进入 Distracted」∧「同类询问距上次 ≥ NudgeCooldownMinutes」。
 产品红线"低置信度不打扰" = Uncertain 永不询问 + 微重启窗口静默。v2 起不再使用数值置信度，低置信由 Uncertain 表达。
 
+**番茄钟相位**由 App 的 `PomodoroService` 动态供给（`Func<PomodoroPhase>` 注入 `MonitoringLoop`，未开启时恒为 `None`）。Break 相位内娱乐/社交合法（R6），相位翻转带来两条迁移路径：**游离中进入休息 → Uncertain（翻案、停止打扰）**；**休息结束回专注相位 → 恢复正常判定（同类冷却照常生效）**。
+
 阈值全部集中在 `FocusStateMachineOptions`（可配置，set 时校验 > 0，非法值立即抛异常）：
 
 ```csharp
@@ -83,7 +85,9 @@ CREATE TABLE IF NOT EXISTS events (
     timestamp_utc TEXT    NOT NULL,     -- 观测时刻（ISO 8601 UTC）
     app_category  TEXT    NOT NULL,     -- Study / Utility / Entertainment / Social / Unknown
     session_id    TEXT    NOT NULL,     -- 本次应用运行的会话 ID
-    state         TEXT    NOT NULL,     -- 该时刻状态机状态
+    state         TEXT    NOT NULL,     -- Focused/Distracted/Uncertain 迁移；
+                                        -- 'AppExit'（退出事件行，截断复盘尾段）；
+                                        -- 'PomodoroFocusCompleted'/'PomodoroBreakCompleted'/'PomodoroAborted'
     idle_seconds  REAL    NOT NULL      -- 当时键鼠空闲秒数
 );
 CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp_utc);
@@ -104,8 +108,9 @@ CREATE TABLE IF NOT EXISTS daily_summary (
     focused_minutes    INTEGER NOT NULL DEFAULT 0,
     distracted_minutes INTEGER NOT NULL DEFAULT 0,
     correction_count   INTEGER NOT NULL DEFAULT 0,
-    summary_text       TEXT    NOT NULL,  -- 固定三句话复盘
-    created_at_utc     TEXT    NOT NULL
+    summary_text       TEXT    NOT NULL,  -- 三句话展示文本（IReportWriter 产出）
+    created_at_utc     TEXT    NOT NULL,
+    report_json        TEXT               -- DailyReportData 序列化（各版写出器的稳定输入）
 );
 ```
 
@@ -113,21 +118,29 @@ CREATE TABLE IF NOT EXISTS daily_summary (
 
 ## 5. 每日复盘（产品红线：必须短，三句话）
 
-`DailySummaryComposer.Compose(focused, distracted, correctionCount)` 纯函数生成，固定三句：
-1. 事实：「今天有效学习约 X 分钟，游离约 Y 分钟。」
-2. 建议：按时长对比二选一（游离偏多→收敛建议；否则→鼓励）。
-3. 回执：有纠正→「今天你纠正了我 N 次……」；无纠正→肯定语气。
+打开入口：**每天首次启动**（当日报告已生成则安静不弹）与托盘"今日复盘"。
+缓存语义：当天已缓存（`report_json` 非空且可解析）直接读，**同一天不重复聚合**；当日 24 点后的新 events 归次日。
 
-单测硬约束：任意输入输出必须恰好含 3 个「。」。
+聚合口径（`DailyReportAggregator`，纯函数；`GetEventsForDate` 含次日首行，时区参数化便于测试）：
+
+- **有效专注分钟**：本地日界 00:00–24:00 内 `Focused` 驻留段之和。段长 = 下一事件行时间戳 − 本行；**退出事件行（`AppExit`，MonitoringLoop 退出时写入）截断尾段**，关机后的时间不会算进专注；尾段无后续行时按兜底截止到当日 24:00（应用仍在运行）；跨零点段按 00:00 切开各归各日。
+- **纠正口径**：`corrections` 中 `CountAsValid` 时刻起记 Focused 段（截到下一事件行，**单段封顶 30 分钟**，防手滑刷数）；`Escape` 不反向扣分；`correction_count` 计当日全部纠正。
+- **最强时段**：对齐 30 分钟窗（00:00–00:30、00:30–01:00…）内专注分钟最多者，**并列取最早**；当日无专注为 null。
+- **明天建议**：最强窗后的第一个 Focused 段起点 T（建议分钟 = 该段时长，夹紧 5–60）；找不到则默认"开始时先做最难的 12 分钟"（T=null，12 分钟）。
+
+展示链：`DailyReportData`（结构化聚合结果）→ `IReportWriter.Write` → 恰好三句（硬约束测试）。
+本周实现 `RuleReportWriter`（规则模板）；**第 3 周 LLM 版实现同一接口替换即可，聚合与 UI 均不感知**。
+结构化结果以 JSON 落 `daily_summary.report_json`，是规则版与 LLM 版共同的稳定输入。
 
 ## 6. 资源红线与已知取舍
 
 资源红线（实测验收见交付清单）：常驻内存 ≤ 300MB、CPU ≤ 2%。达标设计：
 采集循环为 2 秒一次的 DispatcherTimer（UI 线程），单轮仅数次 µs 级 P/Invoke + 字典查找 + 状态机求值；
-events/corrections 只在状态迁移与纠正时写入（稳态零 I/O）；无增长型内存缓存；`MonitoringLoop.Dispose` 停表退订，App 退出依序释放。
+events/corrections 只在状态迁移、纠正与番茄完成/中断时写入（稳态零 I/O）；
+无增长型内存缓存；`MonitoringLoop.Dispose`（写退出事件行）停表退订，App 退出依序释放。
 
 - 前台切换宽限期已实现（`CategorySwitchGraceMilliseconds`）；连续 N 次一致样本才迁移的状态滞回仍是 TODO。
 - 进程名映射表与浏览器标题兜底已实现（`AppCatalog`）；词表为占位，TODO：用户自定义词表 + 从 corrections 学习。
-- 番茄钟相位已进入决策表（R6），但 App 侧番茄钟尚未接入，v1 恒传 `None`；TODO(app)。
-- 每日复盘生成时机（关窗/23:59/次日首次启动）待产品定；TODO。
+- 番茄钟已接入（`PomodoroService` → 相位注入）；时长设置存 settings.json；「明天开始」为单次覆盖不回写默认。
+- 复盘当日缓存冻结；若未来需要"当日二次聚合"，再加失效策略（TODO）。
 - App 单进程单 UI 线程写库；若未来 tick 变重或加后台服务，再评估 PeriodicTimer + WAL。
