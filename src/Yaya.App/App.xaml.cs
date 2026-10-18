@@ -8,6 +8,8 @@ using Serilog;
 using Yaya.App.Pet;
 using Yaya.App.Services;
 using Yaya.App.ViewModels;
+using Yaya.Core.Monitoring;
+using Yaya.Core.Services;
 using Yaya.Core.Storage;
 
 namespace Yaya.App;
@@ -24,6 +26,7 @@ public partial class App : Application
     private TaskbarIcon? _trayIcon;
     private YayaDb? _db;
     private MonitoringLoop? _loop;
+    private PomodoroService? _pomodoro;
     private MainViewModel? _viewModel;
     private PetAssets? _petAssets;
     private PetViewModel? _petViewModel;
@@ -59,13 +62,16 @@ public partial class App : Application
             _trayToggleItem = (MenuItem)_trayIcon.ContextMenu.FindName("TrayToggleMonitoringItem")!;
             Log.Information("托盘图标已加载（内嵌占位图标）");
 
+            _pomodoro = new PomodoroService(() => _settings.FocusMinutes, () => _settings.BreakMinutes);
+
             MonitoringLoop loop = null!;
             _viewModel = new MainViewModel(
                 onMonitoringChanged: ApplyMonitoringEnabled,
                 onNudgeChanged: ApplyNudgeEnabled,
                 onClickThroughChanged: ApplyClickThrough,
+                onPomodoroMinutesChanged: ApplyPomodoroMinutes,
                 clearData: ConfirmClearData);
-            loop = new MonitoringLoop(_db, _viewModel);
+            loop = new MonitoringLoop(_db, _viewModel, () => _pomodoro.CurrentPhase);
             _loop = loop;
 
             _petAssets = new PetAssets();
@@ -84,15 +90,48 @@ public partial class App : Application
                 }
             };
 
+            // 番茄钟接线：相位 → 宠物 Relaxed；完成/中断 → events 表 + 托盘提示
+            _pomodoro.PhaseChanged += phase =>
+            {
+                _petViewModel!.SetRelaxed(phase == PomodoroPhase.Break);
+                Log.Information("番茄相位 -> {Phase}", phase);
+            };
+            _pomodoro.FocusCompleted += () =>
+            {
+                _db!.RecordEvent(DateTimeOffset.UtcNow, AppCategory.Unknown, loop.SessionId, "PomodoroFocusCompleted", 0);
+                _trayIcon?.ShowBalloonTip("芽芽", $"专注完成，休息 {_settings!.BreakMinutes} 分钟～", BalloonIcon.Info);
+                Log.Information("番茄：专注完成");
+            };
+            _pomodoro.BreakCompleted += () =>
+            {
+                _db!.RecordEvent(DateTimeOffset.UtcNow, AppCategory.Unknown, loop.SessionId, "PomodoroBreakCompleted", 0);
+                _trayIcon?.ShowBalloonTip("芽芽", "休息结束，该回来啦。", BalloonIcon.Info);
+                Log.Information("番茄：休息完成");
+            };
+            _pomodoro.Interrupted += () =>
+            {
+                _db!.RecordEvent(DateTimeOffset.UtcNow, AppCategory.Unknown, loop.SessionId, "PomodoroAborted", 0);
+                Log.Information("番茄：中断");
+            };
+
             MainWindow = new MainWindow { DataContext = _viewModel };
 
             // 设置初值（会触发回调完成应用与落盘；Start 幂等，穿透在 Show 后补句柄）
             _viewModel.IsMonitoringEnabled = _settings.MonitoringEnabled;
             _viewModel.IsNudgeEnabled = _settings.NudgeEnabled;
             _viewModel.IsClickThrough = _settings.ClickThrough;
+            _viewModel.FocusMinutesText = _settings.FocusMinutes.ToString();
+            _viewModel.BreakMinutesText = _settings.BreakMinutes.ToString();
 
             _petWindow.Show();
             _petWindow.SetClickThrough(_settings.ClickThrough);
+
+            // 每天首次启动（当日复盘尚未生成）自动弹出；已有缓存则安静，走托盘可再看
+            var today = DateOnly.FromDateTime(DateTime.Now);
+            if (!_db.TryGetDailyReport(today, out _, out _))
+            {
+                Dispatcher.BeginInvoke(new Action(OpenDailyReport));
+            }
 
             base.OnStartup(e);
         }
@@ -107,9 +146,10 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
-        // 依序释放：停轮询与退订事件 → 宠物定时器 → 托盘 → 数据库 → 冲刷日志
+        // 依序释放：停轮询（写退出事件行）与退订事件 → 宠物定时器 → 番茄钟 → 托盘 → 数据库 → 冲刷日志
         _loop?.Dispose();
         _petViewModel?.Dispose();
+        _pomodoro?.Dispose();
         _trayIcon?.Dispose();
         _db?.Dispose();
         Log.Information("芽芽退出");
@@ -174,6 +214,19 @@ public partial class App : Application
         Log.Information("鼠标穿透 -> {Enabled}", enabled);
     }
 
+    private void ApplyPomodoroMinutes(int focusMinutes, int breakMinutes)
+    {
+        if (_settings is null)
+        {
+            return;
+        }
+
+        _settings.FocusMinutes = focusMinutes;
+        _settings.BreakMinutes = breakMinutes;
+        _settings.Save(DataDir);
+        Log.Information("番茄时长 -> 专注 {Focus}min / 休息 {Break}min", focusMinutes, breakMinutes);
+    }
+
     // ---------- 托盘菜单 ----------
 
     private void TrayMenuToggleMonitoring(object sender, RoutedEventArgs e)
@@ -198,6 +251,8 @@ public partial class App : Application
         window.Activate();
     }
 
+    private void TrayMenuShowReport(object sender, RoutedEventArgs e) => OpenDailyReport();
+
     private void TrayMenuClearData(object sender, RoutedEventArgs e) => ConfirmClearData();
 
     private void TrayMenuExit(object sender, RoutedEventArgs e) => Shutdown();
@@ -215,6 +270,47 @@ public partial class App : Application
         _db?.ClearAllData();
         Log.Warning("用户一键清空本地数据");
         _trayIcon?.ShowBalloonTip("芽芽", "本地数据已清空。", BalloonIcon.Info);
+    }
+
+    // ---------- 每日复盘 ----------
+
+    /// <summary>打开今日复盘：当天已缓存直接读；未生成则聚合落库（同日不重复计算）。</summary>
+    private void OpenDailyReport()
+    {
+        if (_db is null || _pomodoro is null)
+        {
+            return;
+        }
+
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        if (!_db.TryGetDailyReport(today, out var data, out var summary) || data is null || summary is null)
+        {
+            var events = _db.GetEventsForDate(today, TimeZoneInfo.Local);
+            var corrections = _db.GetCorrectionsForDate(today, TimeZoneInfo.Local);
+            data = DailyReportAggregator.Aggregate(events, corrections, today, TimeZoneInfo.Local);
+            summary = new RuleReportWriter().Write(data);
+            _db.SaveDailyReport(today, data, summary);
+            Log.Information("复盘已聚合并落库：专注 {Minutes}min，最强 {Peak}",
+                data.FocusedMinutes, data.PeakWindowStart);
+        }
+
+        // 展示文本按「。」拆三行（写出器硬约束恰好三句）
+        var lines = summary.Split('。', StringSplitOptions.RemoveEmptyEntries);
+        var window = new ReportWindow();
+        window.DataContext = new ReportViewModel(
+            lines.Length > 0 ? lines[0] + "。" : summary,
+            lines.Length > 1 ? lines[1] + "。" : string.Empty,
+            lines.Length > 2 ? lines[2] + "。" : string.Empty,
+            data.AdviceMinutes,
+            minutes =>
+            {
+                // 单次时长覆盖：只影响本个番茄，不回写用户默认设置
+                _pomodoro!.StartFocus(minutes);
+                Log.Information("明天开始：以 {Minutes} 分钟启动番茄", minutes);
+                window.Close();
+            });
+        window.Show();
+        window.Activate();
     }
 
     // ---------- 内嵌托盘图标 ----------

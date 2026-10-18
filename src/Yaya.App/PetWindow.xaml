@@ -99,6 +99,14 @@
                                              To="0" Duration="0:0:0.3"/>
                         </Storyboard>
                     </VisualState>
+                    <!-- 番茄休息相位：摇摆幅度加大、节奏放慢，不加新图 -->
+                    <VisualState x:Name="Relaxed">
+                        <Storyboard>
+                            <DoubleAnimation Storyboard.TargetName="PetSway" Storyboard.TargetProperty="Angle"
+                                             From="-5" To="5" Duration="0:0:1"
+                                             AutoReverse="True" RepeatBehavior="Forever"/>
+                        </Storyboard>
+                    </VisualState>
                 </VisualStateGroup>
             </VisualStateManager.VisualStateGroups>
 

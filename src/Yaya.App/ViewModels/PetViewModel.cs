@@ -28,6 +28,8 @@ public partial class PetViewModel : ObservableObject, IDisposable
 
     private PetVisualState _frontState = PetVisualState.Healthy;
     private bool _isTransitioning;
+    private bool _alert;
+    private bool _relaxed;
     private DateTimeOffset? _distractedSince;
 
     /// <summary>当前姿态 VisualState（Healthy / Wilted / Weeds / Bloom）。</summary>
@@ -95,8 +97,9 @@ public partial class PetViewModel : ObservableObject, IDisposable
     /// <summary>状态机迁移入口（App 订阅 MonitoringLoop 后转发）。Uncertain 不触发姿态变化。</summary>
     public void OnFocusTransition(FocusTransition transition)
     {
-        // 心情与姿态正交：摇摆是否停止不受迁移防抖影响
-        MoodState = transition.To == FocusState.Distracted ? "Alert" : "Calm";
+        // 心情与姿态正交：Alert 只跟状态机走，Relaxed 只跟番茄钟走，互不改写对方
+        _alert = transition.To == FocusState.Distracted;
+        UpdateMood();
 
         if (_isTransitioning)
         {
@@ -151,9 +154,19 @@ public partial class PetViewModel : ObservableObject, IDisposable
         NavigateTo("Weeds", PetVisualState.Weeds);
     }
 
-    /// <summary>开发期调试入口（冒烟验收热键 F6/F7 用，TODO(app): 发布前移除）。</summary>
+    /// <summary>开发期调试入口（冒烟验收热键 F6/F7 用，DEBUG_HOTKEYS 开启时可用）。</summary>
     public void DevNavigate(FocusState simulated) =>
         OnFocusTransition(new FocusTransition(FocusState.Uncertain, simulated, false, null));
+
+    /// <summary>番茄钟休息相位：Relaxed 大幅摇摆（Alert 优先，休息中本就不会有 Alert）。</summary>
+    public void SetRelaxed(bool relaxed)
+    {
+        _relaxed = relaxed;
+        UpdateMood();
+    }
+
+    private void UpdateMood() =>
+        MoodState = _alert ? "Alert" : _relaxed ? "Relaxed" : "Calm";
 
     public void Dispose()
     {

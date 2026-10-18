@@ -21,6 +21,12 @@ public sealed class AppSettings
     /// <summary>宠物窗鼠标穿透。</summary>
     public bool ClickThrough { get; set; }
 
+    /// <summary>番茄钟专注时长（分钟，1–120，应用时夹紧）。</summary>
+    public int FocusMinutes { get; set; } = 25;
+
+    /// <summary>番茄钟休息时长（分钟，1–120，应用时夹紧）。</summary>
+    public int BreakMinutes { get; set; } = 5;
+
     public static AppSettings Load(string dataDir)
     {
         try

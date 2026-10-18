@@ -20,6 +20,7 @@ public sealed class MonitoringLoop : IDisposable
 
     private readonly YayaDb _db;
     private readonly MainViewModel _viewModel;
+    private readonly Func<PomodoroPhase> _phaseProvider;
     private readonly DispatcherTimer _timer;
     private readonly FocusStateMachine _machine;
     private bool _timerRunning;
@@ -35,10 +36,11 @@ public sealed class MonitoringLoop : IDisposable
     /// <summary>Core 判定应询问时抛出；是否展示由订阅方按提醒开关决定。</summary>
     public event EventHandler? NudgeRequested;
 
-    public MonitoringLoop(YayaDb db, MainViewModel viewModel)
+    public MonitoringLoop(YayaDb db, MainViewModel viewModel, Func<PomodoroPhase>? phaseProvider = null)
     {
         _db = db;
         _viewModel = viewModel;
+        _phaseProvider = phaseProvider ?? (() => PomodoroPhase.None);
         _machine = new FocusStateMachine();
         _machine.StateChanged += OnMachineStateChanged;
         _timer = new DispatcherTimer
@@ -47,6 +49,9 @@ public sealed class MonitoringLoop : IDisposable
         };
         _timer.Tick += (_, _) => Tick();
     }
+
+    /// <summary>本次运行的会话 ID（番茄事件等扩展事件复用同一会话）。</summary>
+    public string SessionId => _sessionId;
 
     public void Start()
     {
@@ -79,7 +84,7 @@ public sealed class MonitoringLoop : IDisposable
     /// <summary>用户标记“逃避”：进入微重启窗口并把纠正记录落库。</summary>
     public void ReportEscape(string note) => ApplyCorrection(_machine.MarkEscape(note));
 
-    /// <summary>释放轮询资源：停定时器 + 退订状态机事件。App 退出时唯一调用点。</summary>
+    /// <summary>释放轮询资源：写退出事件行（截断尾段）→ 停定时器 → 退订状态机事件。</summary>
     public void Dispose()
     {
         if (_disposed)
@@ -89,7 +94,22 @@ public sealed class MonitoringLoop : IDisposable
 
         _disposed = true;
         Stop();
+        WriteExitEvent();
         _machine.StateChanged -= OnMachineStateChanged;
+    }
+
+    // 退出事件行：把当日最后一个状态段的尾段截断在退出时刻，防止复盘把关机后的时间算进专注
+    private void WriteExitEvent()
+    {
+        try
+        {
+            _db.RecordEvent(DateTimeOffset.UtcNow, _lastCategory, _sessionId, "AppExit", 0);
+            Log.Information("退出事件行已写入（会话 {SessionId}）", _sessionId);
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "退出事件行写入失败（不影响退出）");
+        }
     }
 
     private void OnMachineStateChanged(object? sender, FocusTransition transition)
@@ -119,9 +139,9 @@ public sealed class MonitoringLoop : IDisposable
             var category = AppCatalog.Classify(processName, title);
             _lastCategory = category;
 
-            // v1 尚未接入番茄钟，相位恒为 None（TODO(app): 番茄钟接入后传入实际相位）
+            // 相位由番茄钟服务动态供给（未接入时恒为 None，行为与 v1 一致）
             var idleMilliseconds = (long)(idleSeconds * 1000);
-            var observation = new Observation(category, idleMilliseconds);
+            var observation = new Observation(category, idleMilliseconds, _phaseProvider());
             var transition = _machine.Evaluate(in observation);
 
             // ② 迁移才落库与记日志（稳态零 I/O，资源红线达标的关键）
