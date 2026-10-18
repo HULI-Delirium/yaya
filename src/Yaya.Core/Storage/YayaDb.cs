@@ -1,5 +1,7 @@
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Yaya.Core.Monitoring;
+using Yaya.Core.Services;
 
 namespace Yaya.Core.Storage;
 
@@ -39,10 +41,13 @@ public sealed class YayaDb : IDisposable
             focused_minutes    INTEGER NOT NULL DEFAULT 0,
             distracted_minutes INTEGER NOT NULL DEFAULT 0,
             correction_count   INTEGER NOT NULL DEFAULT 0,
-            summary_text       TEXT    NOT NULL,
-            created_at_utc     TEXT    NOT NULL
+            summary_text       TEXT    NOT NULL,   -- 三句话展示文本（IReportWriter 产出）
+            created_at_utc     TEXT    NOT NULL,
+            report_json        TEXT               -- DailyReportData 序列化（LLM 版写出器的稳定输入）
         );
         """;
+
+    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = false };
 
     private readonly SqliteConnection _connection;
 
@@ -62,7 +67,11 @@ public sealed class YayaDb : IDisposable
     }
 
     /// <summary>记录一次行为事件（状态迁移时由 App 调用）。</summary>
-    public void RecordEvent(DateTimeOffset atUtc, AppCategory category, string sessionId, FocusState state, double idleSeconds)
+    public void RecordEvent(DateTimeOffset atUtc, AppCategory category, string sessionId, FocusState state, double idleSeconds) =>
+        RecordEvent(atUtc, category, sessionId, state.ToString(), idleSeconds);
+
+    /// <summary>记录一行事件，state 为自由字符串（'AppExit' / 'Pomodoro*' 等扩展事件）。</summary>
+    public void RecordEvent(DateTimeOffset atUtc, AppCategory category, string sessionId, string state, double idleSeconds)
     {
         const string sql = """
             INSERT INTO events (timestamp_utc, app_category, session_id, state, idle_seconds)
@@ -73,7 +82,7 @@ public sealed class YayaDb : IDisposable
         command.Parameters.AddWithValue("$ts", atUtc.ToString("O"));
         command.Parameters.AddWithValue("$cat", category.ToString());
         command.Parameters.AddWithValue("$sid", sessionId);
-        command.Parameters.AddWithValue("$state", state.ToString());
+        command.Parameters.AddWithValue("$state", state);
         command.Parameters.AddWithValue("$idle", idleSeconds);
         command.ExecuteNonQuery();
     }
@@ -96,28 +105,130 @@ public sealed class YayaDb : IDisposable
         command.ExecuteNonQuery();
     }
 
-    /// <summary>保存（覆盖）某日的复盘，summaryText 固定为三句话。</summary>
-    public void SaveDailySummary(DateOnly date, int focusedMinutes, int distractedMinutes, int correctionCount, string summaryText)
+    /// <summary>读取本地某日的 events（含次日首行，用于尾段截断），按时间升序。</summary>
+    public IReadOnlyList<EventRow> GetEventsForDate(DateOnly localDate, TimeZoneInfo timeZone)
+    {
+        var fromUtc = ToUtc(localDate.ToDateTime(TimeOnly.MinValue), timeZone);
+        // 多取一天：当日尾段的结束时刻可能是次日的第一行
+        var toUtc = fromUtc.AddDays(2);
+
+        const string sql = """
+            SELECT timestamp_utc, app_category, state, idle_seconds
+            FROM events
+            WHERE timestamp_utc >= $from AND timestamp_utc < $to
+            ORDER BY timestamp_utc, id;
+            """;
+
+        using var command = new SqliteCommand(sql, _connection);
+        command.Parameters.AddWithValue("$from", fromUtc.ToString("O"));
+        command.Parameters.AddWithValue("$to", toUtc.ToString("O"));
+
+        var rows = new List<EventRow>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            rows.Add(new EventRow(
+                DateTimeOffset.Parse(reader.GetString(0)),
+                Enum.Parse<AppCategory>(reader.GetString(1)),
+                reader.GetString(2),
+                reader.GetDouble(3)));
+        }
+
+        return rows;
+    }
+
+    /// <summary>读取本地某日的全部纠正（按时间升序）。</summary>
+    public IReadOnlyList<CorrectionRow> GetCorrectionsForDate(DateOnly localDate, TimeZoneInfo timeZone)
+    {
+        var fromUtc = ToUtc(localDate.ToDateTime(TimeOnly.MinValue), timeZone);
+        var toUtc = fromUtc.AddDays(1);
+
+        const string sql = """
+            SELECT timestamp_utc, kind
+            FROM corrections
+            WHERE timestamp_utc >= $from AND timestamp_utc < $to
+            ORDER BY timestamp_utc, id;
+            """;
+
+        using var command = new SqliteCommand(sql, _connection);
+        command.Parameters.AddWithValue("$from", fromUtc.ToString("O"));
+        command.Parameters.AddWithValue("$to", toUtc.ToString("O"));
+
+        var rows = new List<CorrectionRow>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            rows.Add(new CorrectionRow(
+                DateTimeOffset.Parse(reader.GetString(0)),
+                Enum.Parse<UserCorrectionKind>(reader.GetString(1))));
+        }
+
+        return rows;
+    }
+
+    /// <summary>保存（覆盖）某日复盘：展示文本 + 聚合结构化数据。同一天重复调用为覆盖语义。</summary>
+    public void SaveDailyReport(DateOnly date, DailyReportData data, string summaryText)
     {
         const string sql = """
-            INSERT INTO daily_summary (date, focused_minutes, distracted_minutes, correction_count, summary_text, created_at_utc)
-            VALUES ($date, $focused, $distracted, $corrections, $summary, $created)
+            INSERT INTO daily_summary (date, focused_minutes, distracted_minutes, correction_count, summary_text, created_at_utc, report_json)
+            VALUES ($date, $focused, $distracted, $corrections, $summary, $created, $json)
             ON CONFLICT(date) DO UPDATE SET
                 focused_minutes    = excluded.focused_minutes,
                 distracted_minutes = excluded.distracted_minutes,
                 correction_count   = excluded.correction_count,
                 summary_text       = excluded.summary_text,
-                created_at_utc     = excluded.created_at_utc;
+                created_at_utc     = excluded.created_at_utc,
+                report_json        = excluded.report_json;
             """;
 
         using var command = new SqliteCommand(sql, _connection);
         command.Parameters.AddWithValue("$date", date.ToString("yyyy-MM-dd"));
-        command.Parameters.AddWithValue("$focused", focusedMinutes);
-        command.Parameters.AddWithValue("$distracted", distractedMinutes);
-        command.Parameters.AddWithValue("$corrections", correctionCount);
+        command.Parameters.AddWithValue("$focused", data.FocusedMinutes);
+        command.Parameters.AddWithValue("$distracted", data.DistractedMinutes);
+        command.Parameters.AddWithValue("$corrections", data.CorrectionCount);
         command.Parameters.AddWithValue("$summary", summaryText);
         command.Parameters.AddWithValue("$created", DateTimeOffset.UtcNow.ToString("O"));
+        command.Parameters.AddWithValue("$json", JsonSerializer.Serialize(data, JsonOptions));
         command.ExecuteNonQuery();
+    }
+
+    /// <summary>按日读缓存：report_json 存在且可解析才算命中（同一天不重复聚合）。</summary>
+    public bool TryGetDailyReport(DateOnly date, out DailyReportData? data, out string? summaryText)
+    {
+        data = null;
+        summaryText = null;
+
+        const string sql = """
+            SELECT summary_text, report_json
+            FROM daily_summary
+            WHERE date = $date;
+            """;
+
+        using var command = new SqliteCommand(sql, _connection);
+        command.Parameters.AddWithValue("$date", date.ToString("yyyy-MM-dd"));
+
+        using var reader = command.ExecuteReader();
+        if (!reader.Read())
+        {
+            return false;
+        }
+
+        summaryText = reader.GetString(0);
+        if (reader.IsDBNull(1))
+        {
+            return false;
+        }
+
+        try
+        {
+            data = JsonSerializer.Deserialize<DailyReportData>(reader.GetString(1));
+        }
+        catch (JsonException)
+        {
+            data = null;   // 缓存损坏按未命中处理，调用方重新聚合覆盖
+        }
+
+        return data is not null;
     }
 
     /// <summary>一键清空：删除全部业务数据但保留表结构（产品红线：本地优先、可清空）。</summary>
@@ -139,6 +250,9 @@ public sealed class YayaDb : IDisposable
     public int CountDailySummaries() => CountRows("daily_summary");
 
     public void Dispose() => _connection.Dispose();
+
+    private static DateTimeOffset ToUtc(DateTime localUnspecified, TimeZoneInfo timeZone) =>
+        TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(localUnspecified, DateTimeKind.Unspecified), timeZone);
 
     private int CountRows(string table)
     {

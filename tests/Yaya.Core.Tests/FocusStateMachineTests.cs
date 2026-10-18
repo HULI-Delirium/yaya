@@ -325,6 +325,68 @@ public class FocusStateMachineTests
         Assert.Equal(FocusState.Focused, machine.Current);
     }
 
+    // ---------- 番茄钟相位信号（PomodoroService 接入后由动态相位驱动） ----------
+
+    [Fact]
+    public void Evaluate_休息相位内持续娱乐_保持不确定且永不询问()
+    {
+        var clock = new FakeClock();
+        var machine = CreateMachine(clock, FastOptions);
+
+        for (var i = 0; i < 3; i++)
+        {
+            clock.UtcNowValue += TimeSpan.FromMinutes(1);
+            var t = machine.Evaluate(new Observation(AppCategory.Entertainment, 0, PomodoroPhase.Break));
+            Assert.Equal(FocusState.Uncertain, t.To);
+            Assert.False(t.ShouldNudge);
+        }
+    }
+
+    [Fact]
+    public void Evaluate_游离中相位翻为休息_转入不确定且不询问()
+    {
+        var machine = CreateMachine(new FakeClock(), FastOptions);
+
+        var first = machine.Evaluate(new Observation(AppCategory.Entertainment, 0));   // Distracted + 询问
+        var flipped = machine.Evaluate(new Observation(AppCategory.Entertainment, 0, PomodoroPhase.Break));
+
+        Assert.True(first.ShouldNudge);
+        Assert.Equal(FocusState.Distracted, flipped.From);
+        Assert.Equal(FocusState.Uncertain, flipped.To);
+        Assert.False(flipped.ShouldNudge);
+    }
+
+    [Fact]
+    public void Evaluate_休息转专注相位_恢复判定且同类冷却仍生效()
+    {
+        var clock = new FakeClock();
+        var machine = CreateMachine(clock, FastOptions);
+
+        machine.Evaluate(new Observation(AppCategory.Entertainment, 0));               // 询问（t0）
+        machine.Evaluate(new Observation(AppCategory.Entertainment, 0, PomodoroPhase.Break));
+        var withinCooldown = machine.Evaluate(new Observation(AppCategory.Entertainment, 0));
+        Assert.False(withinCooldown.ShouldNudge);                                      // 距上次不足 10 分钟
+
+        machine.MarkAsValid();                                                         // 回退 Focused
+        clock.UtcNowValue += TimeSpan.FromMinutes(11);
+        var afterCooldown = machine.Evaluate(new Observation(AppCategory.Entertainment, 0));
+        Assert.Equal(FocusState.Distracted, afterCooldown.To);
+        Assert.True(afterCooldown.ShouldNudge);
+    }
+
+    [Fact]
+    public void Evaluate_无番茄相位信号_行为与未接入时一致()
+    {
+        var clock = new FakeClock();
+        var machine = CreateMachine(clock, FastOptions);
+
+        Assert.Equal(FocusState.Distracted, machine.Evaluate(new Observation(AppCategory.Entertainment, 0)).To);
+        clock.UtcNowValue += TimeSpan.FromMilliseconds(2);   // 类别切换：先落宽限
+        Assert.Equal(FocusState.Uncertain, machine.Evaluate(new Observation(AppCategory.Study, 0)).To);
+        clock.UtcNowValue += TimeSpan.FromMilliseconds(2);   // 宽限 settle 后恢复判定
+        Assert.Equal(FocusState.Focused, machine.Evaluate(new Observation(AppCategory.Study, 0)).To);
+    }
+
     // ---------- 事件与配置 ----------
 
     [Fact]
