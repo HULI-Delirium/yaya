@@ -20,6 +20,8 @@
          美术交付后直接替换发布目录里的 PNG 即可，无需重新编译（换图不改代码） -->
     <Content Include="Assets\pet\*.png" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\pet\README.txt" CopyToOutputDirectory="PreserveNewest" />
+    <!-- 同一批 PNG 同时内嵌：单文件发布时 Content 不打包，磁盘无文件时从内嵌资源加载（PetAssets 三级回退） -->
+    <EmbeddedResource Include="Assets\pet\*.png" />
   </ItemGroup>
 
   <PropertyGroup>
