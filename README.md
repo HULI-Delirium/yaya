@@ -21,7 +21,20 @@ dotnet test                          # 运行 Core 层单元测试（改动 Core
 dotnet run --project src/Yaya.App    # 启动：托盘图标 + 主窗口
 ```
 
-发布后运行：`dotnet publish src/Yaya.App -c Release -r win-x64 --self-contained true`（可选）。
+## 发布（单文件 exe）
+
+```bash
+dotnet publish src/Yaya.App -p:PublishProfile=win-x64
+# 产物：src/Yaya.App/bin/Release/net8.0-windows/win-x64/publish/Yaya.App.exe
+# 约 75MB，自包含（win-x64），干净 Windows 机器无需安装 .NET 即可运行
+```
+
+分发只需拷贝 `Yaya.App.exe` 一个文件。注意事项：
+
+- 6 张宠物图**内嵌**在 exe 内；要换图，在 exe 旁建立 `Assets/pet/` 目录放入同名 PNG 即可覆盖（加载优先级：磁盘 > 内嵌 > 矢量占位）。
+- 发布目录可能附带 `Yaya.Core.pdb`（引用项目的符号文件），分发时忽略即可。
+- 数据、日志与设置仍写在 `%LOCALAPPDATA%\Yaya\`，exe 所在目录保持只读也能正常运行。
+- 首次发布演练记录见 [docs/release-drill-2026-10.md](docs/release-drill-2026-10.md)。
 
 ## 目录结构
 
