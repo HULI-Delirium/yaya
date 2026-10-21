@@ -139,6 +139,11 @@ CREATE TABLE IF NOT EXISTS daily_summary (
 events/corrections 只在状态迁移、纠正与番茄完成/中断时写入（稳态零 I/O）；
 无增长型内存缓存；`MonitoringLoop.Dispose`（写退出事件行）停表退订，App 退出依序释放。
 
+**NFR 已在参考硬件上验证通过**（2026-10 发布演练）：AMD R7 9700X / Win11 专业版 / 32GB，
+单文件 exe 纯挂机 30 分钟：CPU 均值 0.58%（≤2%）、私有内存均值 140MB、工作集峰值 255.9MB（≤300MB）。
+数据出处与证据链：`docs/release-drill-2026-10.md` §5（双机对照，判定以常规配置机器为准；
+老核显机器因 WPF 动画软渲染出现 9.47% 属硬件代差，非代码缺陷，优化决策已取消）。
+
 - 前台切换宽限期已实现（`CategorySwitchGraceMilliseconds`）；连续 N 次一致样本才迁移的状态滞回仍是 TODO。
 - 进程名映射表与浏览器标题兜底已实现（`AppCatalog`）；词表为占位，TODO：用户自定义词表 + 从 corrections 学习。
 - 番茄钟已接入（`PomodoroService` → 相位注入）；时长设置存 settings.json；「明天开始」为单次覆盖不回写默认。
