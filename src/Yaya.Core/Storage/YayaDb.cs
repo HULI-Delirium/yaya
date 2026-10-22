@@ -231,6 +231,83 @@ public sealed class YayaDb : IDisposable
         return data is not null;
     }
 
+    /// <summary>导出：全量 events（按时间升序）。</summary>
+    public IReadOnlyList<EventRow> GetAllEvents()
+    {
+        const string sql = """
+            SELECT timestamp_utc, app_category, state, idle_seconds
+            FROM events
+            ORDER BY timestamp_utc, id;
+            """;
+
+        var rows = new List<EventRow>();
+        using var command = new SqliteCommand(sql, _connection);
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            rows.Add(new EventRow(
+                DateTimeOffset.Parse(reader.GetString(0)),
+                Enum.Parse<AppCategory>(reader.GetString(1)),
+                reader.GetString(2),
+                reader.GetDouble(3)));
+        }
+
+        return rows;
+    }
+
+    /// <summary>导出：全量 corrections（按时间升序，含全部列）。</summary>
+    public IReadOnlyList<FullCorrectionRow> GetAllCorrections()
+    {
+        const string sql = """
+            SELECT timestamp_utc, original_state, corrected_state, kind, app_category, note
+            FROM corrections
+            ORDER BY timestamp_utc, id;
+            """;
+
+        var rows = new List<FullCorrectionRow>();
+        using var command = new SqliteCommand(sql, _connection);
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            rows.Add(new FullCorrectionRow(
+                DateTimeOffset.Parse(reader.GetString(0)),
+                reader.GetString(1),
+                reader.GetString(2),
+                reader.GetString(3),
+                reader.GetString(4),
+                reader.IsDBNull(5) ? null : reader.GetString(5)));
+        }
+
+        return rows;
+    }
+
+    /// <summary>导出：全量 daily_summary（按日期升序）。</summary>
+    public IReadOnlyList<DailySummaryRow> GetAllDailySummaries()
+    {
+        const string sql = """
+            SELECT date, focused_minutes, distracted_minutes, correction_count, summary_text, created_at_utc, report_json
+            FROM daily_summary
+            ORDER BY date;
+            """;
+
+        var rows = new List<DailySummaryRow>();
+        using var command = new SqliteCommand(sql, _connection);
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            rows.Add(new DailySummaryRow(
+                reader.GetString(0),
+                reader.GetInt32(1),
+                reader.GetInt32(2),
+                reader.GetInt32(3),
+                reader.GetString(4),
+                DateTimeOffset.Parse(reader.GetString(5)),
+                reader.IsDBNull(6) ? null : reader.GetString(6)));
+        }
+
+        return rows;
+    }
+
     /// <summary>一键清空：删除全部业务数据但保留表结构（产品红线：本地优先、可清空）。</summary>
     public void ClearAllData()
     {

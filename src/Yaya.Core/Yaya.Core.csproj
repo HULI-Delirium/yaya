@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
@@ -8,6 +8,8 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+    <!-- LLM 话术层回退留痕（Warning）用；Core 仅写日志，不产生 sink -->
+    <PackageReference Include="Serilog" Version="4.2.0" />
   </ItemGroup>
 
 </Project>

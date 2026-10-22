@@ -91,6 +91,30 @@ public class YayaDbTests : IDisposable
     }
 
     [Fact]
+    public void ExportQueries_写入后全量回读()
+    {
+        using var db = CreateInitializedDb();
+        var at = DateTimeOffset.UtcNow;
+        db.RecordEvent(at, AppCategory.Study, "s1", FocusState.Focused, 0);
+        db.RecordEvent(at.AddMinutes(1), AppCategory.Unknown, "s1", "PomodoroFocusCompleted", 0);
+        db.RecordCorrection(at, FocusState.Distracted, FocusState.Focused,
+            AppCategory.Study, UserCorrectionKind.CountAsValid, "备注");
+        db.SaveDailyReport(DateOnly.FromDateTime(DateTime.Today), SampleData(35), "三句话。");
+
+        var events = db.GetAllEvents();
+        var corrections = db.GetAllCorrections();
+        var summaries = db.GetAllDailySummaries();
+
+        Assert.Equal(2, events.Count);
+        Assert.Single(corrections);
+        Assert.Equal("CountAsValid", corrections[0].Kind);
+        Assert.Equal("备注", corrections[0].Note);
+        Assert.Single(summaries);
+        Assert.Equal(35, summaries[0].FocusedMinutes);
+        Assert.False(string.IsNullOrEmpty(summaries[0].ReportJson));
+    }
+
+    [Fact]
     public void ClearAllData_一键清空_数据归零但表结构保留()
     {
         using var db = CreateInitializedDb();
