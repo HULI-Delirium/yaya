@@ -40,6 +40,7 @@
                     <MenuItem x:Name="TrayToggleMonitoringItem" Header="暂停采集" Click="TrayMenuToggleMonitoring" />
                     <MenuItem Header="设置…" Click="TrayMenuShowSettings" />
                     <MenuItem Header="今日复盘…" Click="TrayMenuShowReport" />
+                    <MenuItem Header="本周报告…" Click="TrayMenuShowWeeklyReport" />
                     <Separator />
                     <MenuItem Header="一键清空本地数据" Click="TrayMenuClearData" />
                     <MenuItem Header="退出" Click="TrayMenuExit" />

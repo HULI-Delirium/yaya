@@ -1,27 +1,70 @@
 <Window x:Class="Yaya.App.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="芽芽 · 设置" Width="360" Height="330"
+        Title="芽芽 · 设置" Width="400" Height="520"
         WindowStartupLocation="CenterScreen"
-        ResizeMode="CanMinimize">
-    <StackPanel Margin="16">
-        <TextBlock Text="芽芽 · 设置" FontSize="18" FontWeight="Bold" />
-        <TextBlock Text="{Binding StatusText}" Margin="0,10,0,0" FontSize="13" />
-        <CheckBox Content="采集（后台轮询前台状态）" IsChecked="{Binding IsMonitoringEnabled}"
-                  Margin="0,14,0,0" />
-        <CheckBox Content="提醒（游离时气泡询问）" IsChecked="{Binding IsNudgeEnabled}"
-                  Margin="0,8,0,0" />
-        <CheckBox Content="宠物窗鼠标穿透（不可拖动）" IsChecked="{Binding IsClickThrough}"
-                  Margin="0,8,0,0" />
-        <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
-            <TextBlock Text="专注分钟：" VerticalAlignment="Center" />
-            <TextBox Text="{Binding FocusMinutesText, UpdateSourceTrigger=PropertyChanged}" Width="46" />
-            <TextBlock Text="  休息分钟：" VerticalAlignment="Center" />
-            <TextBox Text="{Binding BreakMinutesText, UpdateSourceTrigger=PropertyChanged}" Width="46" />
+        ResizeMode="CanMinimize"
+        Loaded="OnLoaded">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="16">
+            <TextBlock Text="芽芽 · 设置" FontSize="18" FontWeight="Bold" />
+            <TextBlock Text="{Binding StatusText}" Margin="0,10,0,0" FontSize="13" />
+
+            <CheckBox Content="采集（后台轮询前台状态）" IsChecked="{Binding IsMonitoringEnabled}"
+                      Margin="0,12,0,0" />
+            <CheckBox Content="提醒（游离时气泡询问）" IsChecked="{Binding IsNudgeEnabled}"
+                      Margin="0,8,0,0" />
+            <CheckBox Content="宠物窗鼠标穿透（不可拖动）" IsChecked="{Binding IsClickThrough}"
+                      Margin="0,8,0,0" />
+            <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                <TextBlock Text="专注分钟：" VerticalAlignment="Center" />
+                <TextBox Text="{Binding FocusMinutesText, UpdateSourceTrigger=PropertyChanged}" Width="46" />
+                <TextBlock Text="  休息分钟：" VerticalAlignment="Center" />
+                <TextBox Text="{Binding BreakMinutesText, UpdateSourceTrigger=PropertyChanged}" Width="46" />
+            </StackPanel>
+
+            <GroupBox Header="数据与隐私" Margin="0,14,0,0" Padding="10,8">
+                <StackPanel>
+                    <StackPanel Orientation="Horizontal">
+                        <Button Content="数据用途说明" Padding="8,2"
+                                Command="{Binding ShowDataUsageCommand}" />
+                        <Button Content="打开数据文件夹" Padding="8,2" Margin="8,0,0,0"
+                                Command="{Binding OpenDataFolderCommand}" />
+                        <Button Content="导出 JSON" Padding="8,2" Margin="8,0,0,0"
+                                Command="{Binding ExportJsonCommand}" />
+                        <Button Content="导出 CSV" Padding="8,2" Margin="8,0,0,0"
+                                Command="{Binding ExportCsvCommand}" />
+                    </StackPanel>
+                    <Button Content="一键清空本地数据（保留设置）" Padding="8,2" Margin="0,8,0,0"
+                            HorizontalAlignment="Left" Command="{Binding ClearDataCommand}" />
+                    <TextBlock Text="{Binding DataDirText}" FontSize="11" Foreground="Gray"
+                               Margin="0,6,0,0" TextWrapping="Wrap" />
+                </StackPanel>
+            </GroupBox>
+
+            <GroupBox Header="LLM 话术（默认关闭，关闭时永远离线）" Margin="0,10,0,0" Padding="10,8">
+                <StackPanel>
+                    <CheckBox Content="启用 LLM 润色（仅发送聚合数字，不含任何行为明细）"
+                              IsChecked="{Binding IsLlmEnabled}" />
+                    <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                        <TextBlock Text="Base URL：https://" VerticalAlignment="Center" />
+                        <TextBox Text="{Binding LlmBaseUrlText, UpdateSourceTrigger=PropertyChanged}"
+                                 Width="150" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                        <TextBlock Text="Model：" VerticalAlignment="Center" />
+                        <TextBox Text="{Binding LlmModelText, UpdateSourceTrigger=PropertyChanged}"
+                                 Width="110" />
+                        <TextBlock Text="  API Key：" VerticalAlignment="Center" />
+                        <PasswordBox x:Name="LlmApiKeyBox" Width="120"
+                                     PasswordChanged="OnLlmApiKeyChanged" />
+                    </StackPanel>
+                </StackPanel>
+            </GroupBox>
+
+            <TextBlock Text="数据仅保存在本机 %LOCALAPPDATA%\Yaya；一键清空会删除数据与日志，
+                             设置（番茄时长/开关/LLM 配置）保留。"
+                       FontSize="11" Foreground="Gray" Margin="0,10,0,0" TextWrapping="Wrap" />
         </StackPanel>
-        <Button Content="一键清空本地数据" Padding="10,4" Margin="0,16,0,0"
-                HorizontalAlignment="Left" Command="{Binding ClearDataCommand}" />
-        <TextBlock Text="数据仅保存在本机 %LOCALAPPDATA%\Yaya，清空后不可恢复。"
-                   FontSize="11" Foreground="Gray" Margin="0,6,0,0" />
-    </StackPanel>
+    </ScrollViewer>
 </Window>

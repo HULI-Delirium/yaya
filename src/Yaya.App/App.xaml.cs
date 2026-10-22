@@ -23,6 +23,15 @@ public partial class App : Application
     private static readonly string DbPath = Path.Combine(DataDir, "yaya.db");
     private const string TrayIconResourceName = "Yaya.App.Assets.tray.ico";
 
+    private const string DataUsageText =
+        "芽芽的采集边界（隐私红线）\r\n\r\n" +
+        "· 只读：前台窗口标题文本、前台进程名、键鼠空闲时长（系统级计数差）\r\n" +
+        "· 绝不采集：屏幕内容、摄像头、麦克风、按键内容、进程路径/URL\r\n" +
+        "· 数据全部保存在本机 %LOCALAPPDATA%\\Yaya（SQLite + 日志 + 设置），不上传不同步\r\n" +
+        "· 一键清空即刻删空数据与日志；导出 JSON 会自动剔除 LLM api_key\r\n" +
+        "· LLM 话术默认关闭；开启时也只发送 7 个聚合数字，不含任何行为明细\r\n\r\n" +
+        "芽芽不做医疗/心理诊断，所有提醒仅供参考。";
+
     private TaskbarIcon? _trayIcon;
     private YayaDb? _db;
     private MonitoringLoop? _loop;
@@ -33,6 +42,9 @@ public partial class App : Application
     private PetWindow? _petWindow;
     private AppSettings? _settings;
     private MenuItem? _trayToggleItem;
+
+    // 周报当天内存缓存（重复打开同周不重复聚合；不建 weekly 表）
+    private (DateOnly weekStart, WeeklyReportData data)? _weeklyCache;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -70,7 +82,12 @@ public partial class App : Application
                 onNudgeChanged: ApplyNudgeEnabled,
                 onClickThroughChanged: ApplyClickThrough,
                 onPomodoroMinutesChanged: ApplyPomodoroMinutes,
-                clearData: ConfirmClearData);
+                clearData: ConfirmClearData,
+                exportJson: ExportJson,
+                exportCsv: ExportCsv,
+                openDataFolder: OpenDataFolder,
+                showDataUsage: ShowDataUsage,
+                onLlmChanged: ApplyLlmConfig);
             loop = new MonitoringLoop(_db, _viewModel, () => _pomodoro.CurrentPhase);
             _loop = loop;
 
@@ -122,6 +139,11 @@ public partial class App : Application
             _viewModel.IsClickThrough = _settings.ClickThrough;
             _viewModel.FocusMinutesText = _settings.FocusMinutes.ToString();
             _viewModel.BreakMinutesText = _settings.BreakMinutes.ToString();
+            _viewModel.DataDirText = DataDir;
+            _viewModel.IsLlmEnabled = _settings.Llm.Enabled;
+            _viewModel.LlmBaseUrlText = _settings.Llm.BaseUrl.Replace("https://", string.Empty);
+            _viewModel.LlmModelText = _settings.Llm.Model;
+            _viewModel.UpdateApiKey(_settings.Llm.ApiKey);   // 回填密码框（等量保存一次，无害）
 
             _petWindow.Show();
             _petWindow.SetClickThrough(_settings.ClickThrough);
@@ -227,6 +249,92 @@ public partial class App : Application
         Log.Information("番茄时长 -> 专注 {Focus}min / 休息 {Break}min", focusMinutes, breakMinutes);
     }
 
+    // 红线：日志只记 enabled/base/model，绝不记 api_key
+    private void ApplyLlmConfig(bool enabled, string baseUrlText, string model, string apiKey)
+    {
+        if (_settings is null)
+        {
+            return;
+        }
+
+        var normalized = baseUrlText.Trim();
+        if (normalized.Length > 0 && !normalized.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = "https://" + normalized;
+        }
+
+        _settings.Llm = _settings.Llm with
+        {
+            Enabled = enabled,
+            BaseUrl = normalized,
+            Model = model.Trim(),
+            ApiKey = apiKey,
+        };
+        _settings.Save(DataDir);
+        Log.Information("LLM 设置 -> enabled={Enabled}, base={BaseUrl}, model={Model}",
+            enabled, normalized, model.Trim());
+    }
+
+    // ---------- 数据与隐私 ----------
+
+    private void ShowDataUsage() =>
+        MessageBox.Show(DataUsageText, "芽芽 · 数据用途说明",
+            MessageBoxButton.OK, MessageBoxImage.Information);
+
+    private void OpenDataFolder()
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = DataDir,
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "打开数据文件夹失败");
+        }
+    }
+
+    private void ExportJson()
+    {
+        if (_db is null || _settings is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var path = DataExporter.WriteToFile(DataExporter.BuildJson(_db, _settings), DataDir, "json");
+            _trayIcon?.ShowBalloonTip("芽芽", $"已导出 JSON（api_key 已剔除）：\r\n{path}", BalloonIcon.Info);
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "JSON 导出失败");
+            MessageBox.Show("导出失败，详见日志。", "芽芽", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void ExportCsv()
+    {
+        if (_db is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var path = DataExporter.WriteToFile(DataExporter.BuildDailySummaryCsv(_db), DataDir, "csv");
+            _trayIcon?.ShowBalloonTip("芽芽", $"已导出 CSV：\r\n{path}", BalloonIcon.Info);
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "CSV 导出失败");
+            MessageBox.Show("导出失败，详见日志。", "芽芽", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
     // ---------- 托盘菜单 ----------
 
     private void TrayMenuToggleMonitoring(object sender, RoutedEventArgs e)
@@ -253,14 +361,16 @@ public partial class App : Application
 
     private void TrayMenuShowReport(object sender, RoutedEventArgs e) => OpenDailyReport();
 
+    private void TrayMenuShowWeeklyReport(object sender, RoutedEventArgs e) => OpenWeeklyReport();
+
     private void TrayMenuClearData(object sender, RoutedEventArgs e) => ConfirmClearData();
 
     private void TrayMenuExit(object sender, RoutedEventArgs e) => Shutdown();
 
-    /// <summary>一键清空：二次确认后删空本地数据（产品红线）。</summary>
+    /// <summary>一键清空：二次确认后删空数据库 + 日志；设置（番茄时长/开关/LLM 配置）保留（产品红线）。</summary>
     private void ConfirmClearData()
     {
-        var result = MessageBox.Show("确定清空全部本地数据？此操作不可恢复。", "芽芽",
+        var result = MessageBox.Show("确定清空全部本地数据与日志？设置会保留。此操作不可恢复。", "芽芽",
             MessageBoxButton.YesNo, MessageBoxImage.Warning);
         if (result != MessageBoxResult.Yes)
         {
@@ -268,16 +378,39 @@ public partial class App : Application
         }
 
         _db?.ClearAllData();
-        Log.Warning("用户一键清空本地数据");
-        _trayIcon?.ShowBalloonTip("芽芽", "本地数据已清空。", BalloonIcon.Info);
+        ClearLogFiles();
+        Log.Warning("用户一键清空本地数据（设置保留）");
+        _trayIcon?.ShowBalloonTip("芽芽", "本地数据与日志已清空。", BalloonIcon.Info);
+    }
+
+    // 清空范围扩展：yaya.db + logs；settings.json 保留（用户偏好，非采集数据）
+    private void ClearLogFiles()
+    {
+        try
+        {
+            var logsDir = Path.Combine(DataDir, "logs");
+            if (!Directory.Exists(logsDir))
+            {
+                return;
+            }
+
+            foreach (var file in Directory.GetFiles(logsDir, "yaya-*.log"))
+            {
+                File.Delete(file);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "日志文件清理失败（不影响数据库清空结果）");
+        }
     }
 
     // ---------- 每日复盘 ----------
 
-    /// <summary>打开今日复盘：当天已缓存直接读；未生成则聚合落库（同日不重复计算）。</summary>
+    /// <summary>打开今日复盘：当天已缓存直接读；未生成则聚合落库（同日不重复聚合）。</summary>
     private void OpenDailyReport()
     {
-        if (_db is null || _pomodoro is null)
+        if (_db is null || _pomodoro is null || _settings is null)
         {
             return;
         }
@@ -288,10 +421,12 @@ public partial class App : Application
             var events = _db.GetEventsForDate(today, TimeZoneInfo.Local);
             var corrections = _db.GetCorrectionsForDate(today, TimeZoneInfo.Local);
             data = DailyReportAggregator.Aggregate(events, corrections, today, TimeZoneInfo.Local);
-            summary = new RuleReportWriter().Write(data);
+            // LLM 开关即时生效：仅影响"当日首次生成"的 writer 选择；当天已冻结的报告不回头重写
+            summary = ReportWriterFactory.Create(_settings.Llm).Write(data);
             _db.SaveDailyReport(today, data, summary);
-            Log.Information("复盘已聚合并落库：专注 {Minutes}min，最强 {Peak}",
-                data.FocusedMinutes, data.PeakWindowStart);
+            Log.Information("复盘已聚合并落库：专注 {Minutes}min，最强 {Peak}，话术源 {Writer}",
+                data.FocusedMinutes, data.PeakWindowStart,
+                _settings.Llm.IsEffectivelyEnabled ? "llm" : "rule");
         }
 
         // 展示文本按「。」拆三行（写出器硬约束恰好三句）
@@ -311,6 +446,64 @@ public partial class App : Application
             });
         window.Show();
         window.Activate();
+    }
+
+    // ---------- 本周报告 ----------
+
+    private void OpenWeeklyReport()
+    {
+        if (_db is null || _petAssets is null)
+        {
+            return;
+        }
+
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        var weekStart = today.AddDays(-((int)today.DayOfWeek + 6) % 7);   // 周一
+        IReadOnlyList<DailyReportData?> reports;
+        if (_weeklyCache is { } cached && cached.weekStart == weekStart)
+        {
+            reports = cachedReports!;
+        }
+        else
+        {
+            reports = BuildWeekReports(weekStart);
+            var events = _db.GetAllEvents();
+            var data = WeeklyReportAggregator.Aggregate(events, reports, weekStart, TimeZoneInfo.Local);
+            _weeklyCache = (weekStart, data);
+            cachedReports = reports;
+        }
+
+        var window = new WeeklyReportWindow
+        {
+            DataContext = new WeekReportViewModel(_weeklyCache.Value.data, reports, today, weekStart, _petAssets),
+        };
+        window.Show();
+        window.Activate();
+    }
+
+    private IReadOnlyList<DailyReportData?>? cachedReports;
+
+    // 7 天日聚合：有当日缓存（daily_summary.report_json）直接用，缺失的现场聚合
+    private IReadOnlyList<DailyReportData?> BuildWeekReports(DateOnly weekStart)
+    {
+        var reports = new List<DailyReportData?>(7);
+        for (var i = 0; i < 7; i++)
+        {
+            var day = weekStart.AddDays(i);
+            if (_db!.TryGetDailyReport(day, out var cached, out _) && cached is not null)
+            {
+                reports.Add(cached);
+                continue;
+            }
+
+            var events = _db.GetEventsForDate(day, TimeZoneInfo.Local);
+            var corrections = _db.GetCorrectionsForDate(day, TimeZoneInfo.Local);
+            reports.Add(events.Count == 0 && corrections.Count == 0
+                ? null
+                : DailyReportAggregator.Aggregate(events, corrections, day, TimeZoneInfo.Local));
+        }
+
+        return reports;
     }
 
     // ---------- 内嵌托盘图标 ----------

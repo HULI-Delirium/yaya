@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text.Json;
 using Serilog;
+using Yaya.Core.Services;
 
 namespace Yaya.App.Services;
 
@@ -26,6 +27,9 @@ public sealed class AppSettings
 
     /// <summary>番茄钟休息时长（分钟，1–120，应用时夹紧）。</summary>
     public int BreakMinutes { get; set; } = 5;
+
+    /// <summary>LLM 话术设置（api_key 仅本地保存；导出时剔除，红线）。</summary>
+    public LlmSettings Llm { get; set; } = new();
 
     public static AppSettings Load(string dataDir)
     {
