@@ -129,19 +129,25 @@ CREATE TABLE IF NOT EXISTS daily_summary (
 - **明天建议**：最强窗后的第一个 Focused 段起点 T（建议分钟 = 该段时长，夹紧 5–60）；找不到则默认"开始时先做最难的 12 分钟"（T=null，12 分钟）。
 
 展示链：`DailyReportData`（结构化聚合结果）→ `IReportWriter.Write` → 恰好三句（硬约束测试）。
-本周实现 `RuleReportWriter`（规则模板）；**第 3 周 LLM 版实现同一接口替换即可，聚合与 UI 均不感知**。
+`RuleReportWriter`（规则模板）与 `LlmReportWriter`（可选、默认关闭）实现同一接口，聚合与 UI 均不感知。
 结构化结果以 JSON 落 `daily_summary.report_json`，是规则版与 LLM 版共同的稳定输入。
+
+**LLM 请求体白名单（写死，不得扩字段）**：仅 1 个日期 + 7 个聚合数值字段——
+`focusedMinutes` / `peakWindowStart` / `peakWindowEnd` / `adviceStartTime` / `adviceMinutes` /
+`distractedMinutes` / `correctionCount`；窗口标题、进程名、事件明细与时间线一律不出机。
+扩字段必须同时改本节与 `LlmReportWriter` 并补测试。
 
 ## 6. 资源红线与已知取舍
 
-资源红线（实测验收见交付清单）：常驻内存 ≤ 300MB、CPU ≤ 2%。达标设计：
+资源红线（实测验收见交付清单）：常驻内存 ≤ 300MB、CPU ≤ 1%。达标设计：
 采集循环为 2 秒一次的 DispatcherTimer（UI 线程），单轮仅数次 µs 级 P/Invoke + 字典查找 + 状态机求值；
 events/corrections 只在状态迁移、纠正与番茄完成/中断时写入（稳态零 I/O）；
 无增长型内存缓存；`MonitoringLoop.Dispose`（写退出事件行）停表退订，App 退出依序释放。
 
 **NFR 已在参考硬件上验证通过**（2026-10 发布演练）：AMD R7 9700X / Win11 专业版 / 32GB，
-单文件 exe 纯挂机 30 分钟：CPU 均值 0.58%（≤2%）、私有内存均值 140MB、工作集峰值 255.9MB（≤300MB）。
-数据出处与证据链：`docs/release-drill-2026-10.md` §5（双机对照，判定以常规配置机器为准；
+单文件 exe 纯挂机 30 分钟：CPU 均值 0.56%（≤1%）、私有内存均值 140MB、工作集峰值 255.9MB（≤300MB）。
+数据出处与证据链：`docs/release-drill-2026-10.md` §5 与 `docs/drill/teammate-soak-2026-10-21.csv`
+（30 点均值 0.5557%≈0.56%；双机对照，判定以常规配置机器为准；
 老核显机器因 WPF 动画软渲染出现 9.47% 属硬件代差，非代码缺陷，优化决策已取消）。
 
 - 前台切换宽限期已实现（`CategorySwitchGraceMilliseconds`）；连续 N 次一致样本才迁移的状态滞回仍是 TODO。
