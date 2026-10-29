@@ -12,7 +12,7 @@
 
 ## 构建与运行
 
-前置：.NET SDK ≥ 8
+前置：.NET SDK ≥ 8（仓库 `global.json` 固定 8.0.x，`rollForward=latestFeature`，会选用已安装的最新 8.0 特性带）
 
 ```bash
 dotnet restore                       # 首次还原依赖（网络抖动失败时重试即可）
