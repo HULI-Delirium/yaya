@@ -33,6 +33,7 @@ public static class AppCatalog
     private static readonly HashSet<string> UtilityProcesses = new(StringComparer.OrdinalIgnoreCase)
     {
         "calc", "explorer", "mspaint", "Everything",
+        "DeepSeek Harness",   // 本地 AI 编码工具：开箱不再 Unknown；用户规则仍可覆盖
     };
 
     // 宿主进程：进程名无法体现用途，必须退回标题关键词兜底
@@ -58,7 +59,31 @@ public static class AppCatalog
         "课程", "教程", "网课", "学习", "文档", "论文", "知网", "PDF",
     };
 
-    /// <summary>按进程名归类；宿主进程退回标题兜底；完全无法识别时返回 Unknown（不猜）。</summary>
+    /// <summary>是否浏览器宿主进程（标题兜底/站点词只对它们生效）。</summary>
+    public static bool IsBrowserHost(string? processName) =>
+        !string.IsNullOrWhiteSpace(processName) && BrowserHostProcesses.Contains(processName.Trim());
+
+    /// <summary>内置进程表查询；未命中返回 false（不猜）。用户规则由 AppClassifier 先处理。</summary>
+    public static bool TryGetBuiltinProcessCategory(string? processName, out AppCategory category)
+    {
+        category = AppCategory.Unknown;
+        if (string.IsNullOrWhiteSpace(processName))
+        {
+            return false;
+        }
+
+        var name = processName.Trim();
+        if (StudyProcesses.Contains(name)) { category = AppCategory.Study; return true; }
+        if (EntertainmentProcesses.Contains(name)) { category = AppCategory.Entertainment; return true; }
+        if (SocialProcesses.Contains(name)) { category = AppCategory.Social; return true; }
+        if (UtilityProcesses.Contains(name)) { category = AppCategory.Utility; return true; }
+        return false;
+    }
+
+    /// <summary>
+    /// 兼容入口：仅内置表 + 旧标题关键词（无用户规则）。新代码请用 <see cref="AppClassifier"/>；
+    /// 阶段 2 会把本方法改为内置分类器的薄包装。
+    /// </summary>
     public static AppCategory Classify(string? processName, string? windowTitle)
     {
         if (string.IsNullOrWhiteSpace(processName))
