@@ -22,6 +22,13 @@
             <ContextMenu x:Name="PetMenu">
                 <MenuItem x:Name="PetPomodoroMenuItem" Header="开始专注 25 分钟"
                           Click="OnMenuTogglePomodoro" />
+                <MenuItem Header="把当前应用设为…">
+                    <MenuItem Header="学习" Tag="Study" Click="OnMenuSetCurrentCategory" />
+                    <MenuItem Header="工具" Tag="Utility" Click="OnMenuSetCurrentCategory" />
+                    <MenuItem Header="娱乐" Tag="Entertainment" Click="OnMenuSetCurrentCategory" />
+                    <MenuItem Header="社交" Tag="Social" Click="OnMenuSetCurrentCategory" />
+                    <MenuItem Header="不打扰" Tag="Ignore" Click="OnMenuSetCurrentCategory" />
+                </MenuItem>
                 <Separator />
                 <MenuItem Header="今日复盘…" Click="OnMenuDailyReport" />
                 <MenuItem Header="本周报告…" Click="OnMenuWeeklyReport" />

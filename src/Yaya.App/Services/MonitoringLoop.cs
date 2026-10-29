@@ -23,12 +23,16 @@ public sealed class MonitoringLoop : IDisposable
     private readonly Func<PomodoroPhase> _phaseProvider;
     private readonly DispatcherTimer _timer;
     private readonly FocusStateMachine _machine;
+    private AppClassifier _classifier;
     private bool _timerRunning;
     private bool _disposed;
 
     // 会话 ID：每次应用启动生成一个，串联当次运行产生的全部 events
     private readonly string _sessionId = Guid.NewGuid().ToString("N");
     private AppCategory _lastCategory = AppCategory.Unknown;
+    private ClassificationResult _lastClassification = ClassificationResult.Unknown("尚未采集");
+    private string _lastProcessName = string.Empty;
+    private bool _lastIsBrowserHost;
 
     /// <summary>状态迁移事件（宠物窗动画/设置页挂接）。</summary>
     public event EventHandler<FocusTransition>? FocusTransitionOccurred;
@@ -36,11 +40,22 @@ public sealed class MonitoringLoop : IDisposable
     /// <summary>Core 判定应询问时抛出；是否展示由订阅方按提醒开关决定。</summary>
     public event EventHandler? NudgeRequested;
 
-    public MonitoringLoop(YayaDb db, MainViewModel viewModel, Func<PomodoroPhase>? phaseProvider = null)
+    /// <summary>分类结果变化（进程/来源/类别/规则变化时发，供设置页当前应用卡片）。</summary>
+    public event EventHandler<ClassificationResult>? ClassificationChanged;
+
+    /// <summary>每轮判定后都发（即使状态没迁移），供 Uncertain 角标与「为什么」浮层。</summary>
+    public event EventHandler<FocusState>? StateEvaluated;
+
+    public MonitoringLoop(
+        YayaDb db,
+        MainViewModel viewModel,
+        Func<PomodoroPhase>? phaseProvider = null,
+        AppClassifier? classifier = null)
     {
         _db = db;
         _viewModel = viewModel;
         _phaseProvider = phaseProvider ?? (() => PomodoroPhase.None);
+        _classifier = classifier ?? AppClassifier.BuiltinOnly;
         _machine = new FocusStateMachine();
         _machine.StateChanged += OnMachineStateChanged;
         _timer = new DispatcherTimer
@@ -52,6 +67,22 @@ public sealed class MonitoringLoop : IDisposable
 
     /// <summary>本次运行的会话 ID（番茄事件等扩展事件复用同一会话）。</summary>
     public string SessionId => _sessionId;
+
+    /// <summary>最近一次分类结果（UI 解释用；Reason 不进日志）。</summary>
+    public ClassificationResult LastClassification => _lastClassification;
+
+    /// <summary>最近一次前台进程名（仅 UI 展示；日志按分级策略处理）。</summary>
+    public string LastProcessName => _lastProcessName;
+
+    /// <summary>最近一次前台是否为浏览器宿主。</summary>
+    public bool LastIsBrowserHost => _lastIsBrowserHost;
+
+    /// <summary>当前三态（状态机内部值，只读）。</summary>
+    public FocusState CurrentState => _machine.Current;
+
+    /// <summary>规则变更后热替换分类器（UI 线程调用）。</summary>
+    public void UpdateClassifier(AppClassifier classifier) =>
+        _classifier = classifier ?? throw new ArgumentNullException(nameof(classifier));
 
     public void Start()
     {
@@ -117,6 +148,30 @@ public sealed class MonitoringLoop : IDisposable
         Log.Information("状态迁移事件 {From} -> {To}", transition.From, transition.To);
     }
 
+    // 分类变化才通知 UI；日志只记进程名/来源/规则 Id（不记标题/规则值）
+    private void PublishClassification(string processName, ClassificationResult classification)
+    {
+        var process = processName.Trim();
+        var changed = !string.Equals(process, _lastProcessName, StringComparison.OrdinalIgnoreCase)
+            || classification.Category != _lastClassification.Category
+            || classification.Source != _lastClassification.Source
+            || !string.Equals(classification.RuleId, _lastClassification.RuleId, StringComparison.Ordinal)
+            || !string.Equals(classification.MatchedSite, _lastClassification.MatchedSite, StringComparison.OrdinalIgnoreCase)
+            || classification.IsMuted != _lastClassification.IsMuted;
+
+        if (!changed)
+        {
+            return;
+        }
+
+        _lastProcessName = process;
+        _lastIsBrowserHost = AppCatalog.IsBrowserHost(process);
+        _lastClassification = classification;
+        Log.Debug("分类上下文：进程 {ProcessName}，来源 {Source}，规则 {RuleId}",
+            process, classification.Source, classification.RuleId);
+        ClassificationChanged?.Invoke(this, classification);
+    }
+
     private void ApplyCorrection(CorrectionRecord record)
     {
         _db.RecordCorrection(record.AtUtc, record.OriginalState, record.ResultingState,
@@ -132,26 +187,28 @@ public sealed class MonitoringLoop : IDisposable
     {
         try
         {
-            // ① 采集：进程名（类别映射主键）+ 标题（浏览器兜底）+ 空闲毫秒
+            // ① 采集：进程名（类别映射主键）+ 标题（浏览器站点兜底）+ 空闲毫秒
             var processName = NativeMethods.GetForegroundProcessName();
             var title = NativeMethods.GetForegroundWindowTitle();
             var idleSeconds = NativeMethods.GetIdleSeconds();
-            var category = AppCatalog.Classify(processName, title);
+            var classification = _classifier.Classify(processName, title);
+            var category = classification.Category;
             _lastCategory = category;
+            PublishClassification(processName, classification);
 
             // 相位由番茄钟服务动态供给（未接入时恒为 None，行为与 v1 一致）
             var idleMilliseconds = (long)(idleSeconds * 1000);
             var observation = new Observation(category, idleMilliseconds, _phaseProvider());
             var transition = _machine.Evaluate(in observation);
+            StateEvaluated?.Invoke(this, transition.To);
 
             // ② 迁移才落库与记日志（稳态零 I/O，资源红线达标的关键）
             if (transition.From != transition.To)
             {
                 _db.RecordEvent(DateTimeOffset.UtcNow, category, _sessionId, transition.To, idleSeconds);
-                Log.Information("状态变化 {From} -> {To}（前台类别 {Category}，空闲 {IdleMs}ms）",
-                    transition.From, transition.To, category, idleMilliseconds);
-                // 进程名与标题只进本地日志，用于校准映射词表（红线：不进提醒气泡）
-                Log.Debug("迁移上下文：进程 {ProcessName}，标题“{Title}”", processName, title);
+                // 红线：只记类别/来源/规则 Id，不记标题、不记规则值
+                Log.Information("状态变化 {From} -> {To}（类别 {Category}，来源 {Source}，规则 {RuleId}，空闲 {IdleMs}ms）",
+                    transition.From, transition.To, category, classification.Source, classification.RuleId, idleMilliseconds);
                 FocusTransitionOccurred?.Invoke(this, transition);
             }
 

@@ -36,8 +36,10 @@ public partial class MainViewModel : ObservableObject
         Action exportCsv,
         Action openDataFolder,
         Action showDataUsage,
-        Action<bool, string, string, string> onLlmChanged)
+        Action<bool, string, string, string> onLlmChanged,
+        AppRulesViewModel appRules)
     {
+        AppRules = appRules;
         _onMonitoringChanged = onMonitoringChanged;
         _onNudgeChanged = onNudgeChanged;
         _onPetVisibleChanged = onPetVisibleChanged;
@@ -51,6 +53,9 @@ public partial class MainViewModel : ObservableObject
         _showDataUsage = showDataUsage;
         _onLlmChanged = onLlmChanged;
     }
+
+    /// <summary>「应用与网页」块：当前前台卡片 + 用户规则列表。</summary>
+    public AppRulesViewModel AppRules { get; }
 
     /// <summary>当前状态一句话，由感知循环回写。</summary>
     [ObservableProperty]

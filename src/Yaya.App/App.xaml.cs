@@ -42,6 +42,8 @@ public partial class App : Application
     private PetViewModel? _petViewModel;
     private PetWindow? _petWindow;
     private AppSettings? _settings;
+    private RuleManager? _rules;
+    private AppRulesViewModel? _appRules;
     private MenuItem? _trayToggleItem;
     private MenuItem? _trayPomodoroItem;
     private MenuItem? _trayPetVisibilityItem;
@@ -87,6 +89,8 @@ public partial class App : Application
             Log.Information("托盘图标已加载（内嵌占位图标）");
 
             _pomodoro = new PomodoroService(() => _settings.FocusMinutes, () => _settings.BreakMinutes);
+            _rules = new RuleManager(DataDir);
+            _appRules = new AppRulesViewModel(_rules, ConfirmResetRules, OpenSettings);
 
             MonitoringLoop loop = null!;
             _viewModel = new MainViewModel(
@@ -101,9 +105,20 @@ public partial class App : Application
                 exportCsv: ExportCsv,
                 openDataFolder: OpenDataFolder,
                 showDataUsage: ShowDataUsage,
-                onLlmChanged: ApplyLlmConfig);
-            loop = new MonitoringLoop(_db, _viewModel, () => _pomodoro.CurrentPhase);
+                onLlmChanged: ApplyLlmConfig,
+                appRules: _appRules);
+            loop = new MonitoringLoop(_db, _viewModel, () => _pomodoro.CurrentPhase,
+                new AppClassifier(_rules.Current));
             _loop = loop;
+
+            // 规则变更 → 热替换分类器；分类变化 → 设置页当前应用卡片
+            _rules.Changed += (_, _) =>
+            {
+                _loop?.UpdateClassifier(new AppClassifier(_rules.Current));
+                Log.Information("分类规则已更新：{Count} 条", _rules.Current.Count);
+            };
+            loop.ClassificationChanged += (_, result) =>
+                _appRules.UpdateCurrent(result, loop.LastProcessName, loop.LastIsBrowserHost);
 
             _petAssets = new PetAssets();
             _petViewModel = new PetViewModel(_petAssets,
@@ -117,6 +132,7 @@ public partial class App : Application
             _petWindow.WeeklyReportRequested += (_, _) => OpenWeeklyReport();
             _petWindow.HistoryRequested += (_, _) => OpenHistory();
             _petWindow.SettingsRequested += (_, _) => OpenSettings();
+            _petWindow.SetCurrentCategoryRequested += (_, category) => ApplyCurrentCategory(category);
             _petWindow.HidePetRequested += (_, _) => SetPetVisible(false);
             _petWindow.ExitRequested += (_, _) => Shutdown();
 
@@ -442,6 +458,59 @@ public partial class App : Application
         window.Show();
         window.Activate();
     }
+
+    // ---------- 分类规则（设置页 / 桌宠菜单共用） ----------
+
+    private void ApplyCurrentCategory(RuleCategory category)
+    {
+        if (_loop is null || _appRules is null || _rules is null)
+        {
+            return;
+        }
+
+        var process = _loop.LastProcessName;
+        if (string.IsNullOrWhiteSpace(process))
+        {
+            _trayIcon?.ShowBalloonTip("芽芽", "还没识别到前台应用。", BalloonIcon.Info);
+            return;
+        }
+
+        if (_loop.LastIsBrowserHost)
+        {
+            // 浏览器不能建进程规则（会把所有网页设成同一类），改为标题规则
+            _appRules.PrefillTitleRule(_loop.LastClassification.MatchedSite);
+            _trayIcon?.ShowBalloonTip("芽芽", "浏览器窗口请用标题规则，已在设置里预填。", BalloonIcon.Info);
+            return;
+        }
+
+        _rules.AddProcessRule(process, category);
+        _appRules.Reload();
+        _trayIcon?.ShowBalloonTip("芽芽", $"已设为{CategoryText(category)}：{process}", BalloonIcon.Info);
+        Log.Information("一键设置分类：{ProcessName} -> {Category}", process, category);
+    }
+
+    private void ConfirmResetRules()
+    {
+        var result = MessageBox.Show("确定清空全部自定义规则？内置表不受影响。", "芽芽",
+            MessageBoxButton.YesNo, MessageBoxImage.Warning);
+        if (result != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        _rules?.ResetToDefault();
+        _appRules?.Reload();
+        Log.Information("用户恢复默认分类规则");
+    }
+
+    private static string CategoryText(RuleCategory category) => category switch
+    {
+        RuleCategory.Study => "学习",
+        RuleCategory.Utility => "工具",
+        RuleCategory.Entertainment => "娱乐",
+        RuleCategory.Social => "社交",
+        _ => "不打扰",
+    };
 
     // ---------- 番茄控制（桌宠菜单 / 托盘共用） ----------
 

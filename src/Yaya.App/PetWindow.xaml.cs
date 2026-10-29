@@ -33,6 +33,9 @@ public partial class PetWindow : Window
 
     public event EventHandler? SettingsRequested;
 
+    /// <summary>「把当前应用设为…」：只抛类别，进程名与规则写入由 App 层负责。</summary>
+    public event EventHandler<RuleCategory>? SetCurrentCategoryRequested;
+
     public event EventHandler? HidePetRequested;
 
     public event EventHandler? ExitRequested;
@@ -150,6 +153,15 @@ public partial class PetWindow : Window
 
     private void OnMenuSettings(object sender, RoutedEventArgs e) =>
         SettingsRequested?.Invoke(this, EventArgs.Empty);
+
+    private void OnMenuSetCurrentCategory(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem { Tag: string tag }
+            && Enum.TryParse<RuleCategory>(tag, out var category))
+        {
+            SetCurrentCategoryRequested?.Invoke(this, category);
+        }
+    }
 
     private void OnMenuTogglePetVisibility(object sender, RoutedEventArgs e) =>
         HidePetRequested?.Invoke(this, EventArgs.Empty);
