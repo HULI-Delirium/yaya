@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using Hardcodet.Wpf.TaskbarNotification;
 using Serilog;
 using Yaya.App.Pet;
@@ -50,6 +51,7 @@ public partial class App : Application
     private MenuItem? _trayPetVisibilityItem;
     private Window? _historyWindow;
     private WindowPickerWindow? _windowPickerWindow;
+    private MainWindow? _settingsWindow;
     private bool _applyingPetVisible;
     private readonly HashSet<string> _suggestedProcesses = new(StringComparer.OrdinalIgnoreCase);
 
@@ -71,6 +73,9 @@ public partial class App : Application
                 retainedFileCountLimit: 7,
                 outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
             .CreateLogger();
+
+        // UI 异常兜底：至少留下日志并提示，不再静默闪退（窗口/菜单类问题优先在这里显形）
+        DispatcherUnhandledException += OnDispatcherUnhandledException;
 
         try
         {
@@ -202,7 +207,7 @@ public partial class App : Application
                 Log.Information("番茄：中断");
             };
 
-            MainWindow = new MainWindow { DataContext = _viewModel };
+            // 设置窗按需创建：启动时不建隐藏窗口，避免「关闭后再点设置」对已关闭窗口 Show 崩溃
 
             // 设置初值（会触发回调完成应用与落盘；Start 幂等，穿透在 Show 后补句柄）
             _viewModel.IsMonitoringEnabled = _settings.MonitoringEnabled;
@@ -255,6 +260,21 @@ public partial class App : Application
         Log.Information("芽芽退出");
         Log.CloseAndFlush();
         base.OnExit(e);
+    }
+
+    private static void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
+    {
+        Log.Error(e.Exception, "UI 未处理异常");
+        e.Handled = true;
+        try
+        {
+            MessageBox.Show("芽芽遇到一个界面异常，已写入本地日志。\r\n可以继续使用；若窗口异常，请从托盘退出后重开。",
+                "芽芽", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        catch
+        {
+            // 关闭过程中弹窗失败也不让它再次击穿进程
+        }
     }
 
     // ---------- 设置项应用 ----------
@@ -490,14 +510,31 @@ public partial class App : Application
 
     private void OpenSettings()
     {
-        if (MainWindow is not { } window)
+        if (_viewModel is null)
         {
-            window = new MainWindow { DataContext = _viewModel };
-            MainWindow = window;
+            return;
         }
 
-        window.Show();
-        window.Activate();
+        // 关闭后再打开必须创建新窗口：WPF 窗口 Close 后不能再 Show
+        if (_settingsWindow is null || !_settingsWindow.IsLoaded)
+        {
+            var window = new MainWindow { DataContext = _viewModel };
+            window.Closed += (_, _) =>
+            {
+                if (ReferenceEquals(_settingsWindow, window))
+                {
+                    _settingsWindow = null;
+                }
+            };
+            _settingsWindow = window;
+            if (MainWindow is null)
+            {
+                MainWindow = window;
+            }
+        }
+
+        _settingsWindow.Show();
+        _settingsWindow.Activate();
     }
 
     /// <summary>

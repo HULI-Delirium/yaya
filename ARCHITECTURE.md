@@ -174,6 +174,8 @@ CREATE TABLE IF NOT EXISTS daily_summary (
 采集循环为 2 秒一次的 DispatcherTimer（UI 线程），单轮仅数次 µs 级 P/Invoke + 字典查找 + 状态机求值；
 events/corrections 只在状态迁移、纠正与番茄完成/中断时写入（稳态零 I/O）；
 无增长型内存缓存；`MonitoringLoop.Dispose`（写退出事件行）停表退订，App 退出依序释放。
+UI 窗口生命周期：设置窗按需创建（`_settingsWindow`），关闭后再次打开会新建窗口，
+避免对已关闭的 WPF Window 调用 `Show`；`DispatcherUnhandledException` 记录日志并提示，不再静默闪退。
 
 **NFR 已在参考硬件上验证通过**（2026-10 发布演练）：AMD R7 9700X / Win11 专业版 / 32GB，
 单文件 exe 纯挂机 30 分钟：CPU 均值 0.56%（≤1%）、私有内存均值 140MB、工作集峰值 255.9MB（≤300MB）。
