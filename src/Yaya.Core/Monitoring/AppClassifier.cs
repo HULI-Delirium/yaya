@@ -39,6 +39,7 @@ public sealed class AppClassifier
 
         var isBrowser = AppCatalog.IsBrowserHost(process);
         var title = RuleText.NormalizeTitle(windowTitle);
+        var matchTitle = isBrowser ? BrowserTitleCleaner.Clean(title) : title;
 
         foreach (var rule in _titleRules)
         {
@@ -47,7 +48,7 @@ public sealed class AppClassifier
                 continue;
             }
 
-            if (Matches(rule, title))
+            if (Matches(rule, matchTitle))
             {
                 return FromRule(rule, ClassificationSource.UserTitle);
             }
@@ -61,7 +62,13 @@ public sealed class AppClassifier
 
         if (isBrowser)
         {
-            // 站点词表在阶段 2 接入；先按「不猜」返回浏览器兜底
+            if (SiteCatalog.TryMatch(matchTitle, out var site))
+            {
+                return new ClassificationResult(site.Category, ClassificationSource.BuiltinSite, null,
+                    site.Keyword, false,
+                    $"浏览器标题命中站点「{site.Keyword}」→ {CategoryLabel(site.Category)}");
+            }
+
             return new ClassificationResult(AppCategory.Unknown, ClassificationSource.BrowserFallback, null, null, false,
                 "浏览器标题未命中任何站点词 → 未知（不猜）。");
         }

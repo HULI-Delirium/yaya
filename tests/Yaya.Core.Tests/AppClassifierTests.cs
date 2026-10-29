@@ -215,12 +215,12 @@ public class AppClassifierTests
     {
         var classifier = new AppClassifier(new[]
         {
-            TitleRule("知网", RuleCategory.Study, RuleMatch.Exact, browserOnly: true),
+            TitleRule("第 3 章 线性表", RuleCategory.Study, RuleMatch.Exact, browserOnly: true),
         });
 
-        Assert.Equal(AppCategory.Study, classifier.Classify("chrome", "知网").Category);
+        Assert.Equal(AppCategory.Study, classifier.Classify("chrome", "第 3 章 线性表").Category);
         Assert.Equal(ClassificationSource.BrowserFallback,
-            classifier.Classify("chrome", "知网 - 论文").Source);
+            classifier.Classify("chrome", "第 3 章 线性表 - 补充").Source);
     }
 
     [Fact]
