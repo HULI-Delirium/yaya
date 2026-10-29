@@ -1,0 +1,70 @@
+<Window x:Class="Yaya.App.WindowPickerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="芽芽 · 选择窗口" Width="660" Height="560"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="CanMinimize">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0">
+            <TextBlock Text="选择窗口设置分类" FontSize="18" FontWeight="Bold" />
+            <TextBlock FontSize="11" Foreground="Gray" TextWrapping="Wrap" Margin="0,4,0,0"
+                       Text="这里列出当前可见的窗口，方便你给后台/非前台窗口归类。仅在你打开本窗口时枚举一次；窗口标题只在本地显示，不写日志、不落库；规则只保存你确认的进程名或关键词。" />
+        </StackPanel>
+
+        <ListView x:Name="WindowList" Grid.Row="1" Margin="0,10,0,10"
+                  SelectionChanged="OnSelectionChanged">
+            <ListView.View>
+                <GridView>
+                    <GridViewColumn Header="进程" Width="180"
+                                    DisplayMemberBinding="{Binding ProcessName}" />
+                    <GridViewColumn Header="窗口标题" Width="430"
+                                    DisplayMemberBinding="{Binding DisplayTitle}" />
+                </GridView>
+            </ListView.View>
+        </ListView>
+
+        <Border Grid.Row="2" Background="#FFF6F8F5" CornerRadius="6" Padding="10">
+            <StackPanel>
+                <TextBlock x:Name="CurrentHintText" FontSize="11" Foreground="Gray"
+                           Text="先在上方选一个窗口。" TextWrapping="Wrap" />
+
+                <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                    <RadioButton x:Name="ProcessRadio" Content="按进程（整个应用）"
+                                 GroupName="RuleTarget" IsChecked="True" Checked="OnTargetChanged" />
+                    <RadioButton x:Name="TitleRadio" Content="按标题关键词（单个页面/窗口）"
+                                 GroupName="RuleTarget" Margin="14,0,0,0" Checked="OnTargetChanged" />
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                    <TextBlock Text="规则值：" FontSize="12" VerticalAlignment="Center" />
+                    <TextBox x:Name="RuleValueBox" Width="230" Height="24" FontSize="12" />
+                    <TextBlock Text="  类别：" FontSize="12" VerticalAlignment="Center" />
+                    <ComboBox x:Name="CategoryBox" Width="82" Height="24" FontSize="12"
+                              SelectedIndex="0">
+                        <ComboBoxItem Content="学习" Tag="Study" />
+                        <ComboBoxItem Content="工具" Tag="Utility" />
+                        <ComboBoxItem Content="娱乐" Tag="Entertainment" />
+                        <ComboBoxItem Content="社交" Tag="Social" />
+                        <ComboBoxItem Content="不打扰" Tag="Ignore" />
+                    </ComboBox>
+                    <CheckBox x:Name="BrowserOnlyBox" Content="仅浏览器生效" FontSize="11"
+                              Margin="8,0,0,0" VerticalAlignment="Center" IsChecked="True" />
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                    <Button Content="保存规则" Padding="12,3" Click="OnSaveClicked" />
+                    <Button Content="刷新窗口" Padding="12,3" Margin="8,0,0,0" Click="OnRefreshClicked" />
+                    <Button Content="关闭" Padding="12,3" Margin="8,0,0,0" Click="OnCloseClicked" />
+                </StackPanel>
+                <TextBlock x:Name="StatusText" FontSize="11" Foreground="#FF2F6B3F"
+                           TextWrapping="Wrap" Margin="0,6,0,0" />
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

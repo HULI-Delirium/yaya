@@ -53,6 +53,7 @@ tests/
 
 - 数据库：`%LOCALAPPDATA%\Yaya\yaya.db`（SQLite，三张表：`events` / `corrections` / `daily_summary`）
 - 分类规则：`%LOCALAPPDATA%\Yaya\rules.json`（只存用户输入的进程名/标题关键词；不读 URL、不读页面内容）
+- 窗口选择器：仅在你点击「选择窗口…」时枚举一次可见窗口标题，仅本机内存显示，不写日志、不落库
 - 日志：`%LOCALAPPDATA%\Yaya\logs\yaya-*.log`（按天滚动，保留 7 天；窗口标题默认不写，
   仅在设置里显式开启「诊断日志」时记录）
 - 彻底移除：退出程序后删除上述整个 `Yaya` 目录即可，无任何远端副本

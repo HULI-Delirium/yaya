@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Windows.Threading;
 using Serilog;
 using Yaya.App.ViewModels;
@@ -17,6 +18,9 @@ public sealed class MonitoringLoop : IDisposable
 {
     // 采样间隔（TODO(校准)：平衡及时性与 CPU 占用，资源红线见 ARCHITECTURE.md 第 6 节）
     private const double SampleIntervalSeconds = 2;
+
+    // 自己的进程名：宠物/设置/记录/浮层获得前台时不参与分类，保留上一个外部前台
+    private static readonly string SelfProcessName = Process.GetCurrentProcess().ProcessName;
 
     private readonly YayaDb _db;
     private readonly MainViewModel _viewModel;
@@ -193,6 +197,15 @@ public sealed class MonitoringLoop : IDisposable
         {
             // ① 采集：进程名（类别映射主键）+ 标题（浏览器站点兜底）+ 空闲毫秒
             var processName = NativeMethods.GetForegroundProcessName();
+
+            // 芽芽自己的窗口（点桌宠/设置/记录）不参与分类：
+            // 否则「把当前应用设为…」永远只能抓到 Yaya.App，也会把状态误打成 Unknown。
+            if (!string.IsNullOrWhiteSpace(processName)
+                && string.Equals(processName.Trim(), SelfProcessName, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
             var title = NativeMethods.GetForegroundWindowTitle();
             var idleSeconds = NativeMethods.GetIdleSeconds();
             var classification = _classifier.Classify(processName, title);

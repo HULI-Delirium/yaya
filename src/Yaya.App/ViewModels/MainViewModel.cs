@@ -24,6 +24,7 @@ public partial class MainViewModel : ObservableObject
     private readonly Action _showDataUsage;
     private readonly Action<bool, string, string, string> _onLlmChanged;   // enabled, baseUrl, model, apiKey
     private readonly Action<bool> _onDiagnosticLoggingChanged;
+    private readonly Action _openWindowPicker;
 
     public MainViewModel(
         Action<bool> onMonitoringChanged,
@@ -39,10 +40,12 @@ public partial class MainViewModel : ObservableObject
         Action showDataUsage,
         Action<bool, string, string, string> onLlmChanged,
         Action<bool> onDiagnosticLoggingChanged,
+        Action openWindowPicker,
         AppRulesViewModel appRules)
     {
         AppRules = appRules;
         _onDiagnosticLoggingChanged = onDiagnosticLoggingChanged;
+        _openWindowPicker = openWindowPicker;
         _onMonitoringChanged = onMonitoringChanged;
         _onNudgeChanged = onNudgeChanged;
         _onPetVisibleChanged = onPetVisibleChanged;
@@ -192,6 +195,9 @@ public partial class MainViewModel : ObservableObject
 
     [RelayCommand]
     private void ShowDataUsage() => _showDataUsage();
+
+    [RelayCommand]
+    private void OpenWindowPicker() => _openWindowPicker();
 
     // 两个框都解析为 1–120 的整数时才回调（输入过程中不完整不触发）
     private void NotifyPomodoroMinutes()

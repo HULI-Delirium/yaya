@@ -27,6 +27,7 @@ public partial class App : Application
     private const string DataUsageText =
         "芽芽的采集边界（隐私红线）\r\n\r\n" +
         "· 只读：前台窗口标题文本、前台进程名、键鼠空闲时长（系统级计数差）\r\n" +
+        "· 窗口选择器：仅在你点击「选择窗口…」时枚举一次可见窗口标题，仅本机显示，不写日志、不落库\r\n" +
         "· 绝不采集：屏幕内容、摄像头、麦克风、按键内容、进程路径/URL\r\n" +
         "· 数据全部保存在本机 %LOCALAPPDATA%\\Yaya（SQLite + 日志 + 设置），不上传不同步\r\n" +
         "· 一键清空即刻删空数据与日志；导出 JSON 会自动剔除 LLM api_key\r\n" +
@@ -48,6 +49,7 @@ public partial class App : Application
     private MenuItem? _trayPomodoroItem;
     private MenuItem? _trayPetVisibilityItem;
     private Window? _historyWindow;
+    private WindowPickerWindow? _windowPickerWindow;
     private bool _applyingPetVisible;
     private readonly HashSet<string> _suggestedProcesses = new(StringComparer.OrdinalIgnoreCase);
 
@@ -108,6 +110,7 @@ public partial class App : Application
                 showDataUsage: ShowDataUsage,
                 onLlmChanged: ApplyLlmConfig,
                 onDiagnosticLoggingChanged: ApplyDiagnosticLogging,
+                openWindowPicker: OpenWindowPicker,
                 appRules: _appRules);
             loop = new MonitoringLoop(_db, _viewModel, () => _pomodoro.CurrentPhase,
                 new AppClassifier(_rules.Current));
@@ -156,6 +159,7 @@ public partial class App : Application
             _petWindow.WeeklyReportRequested += (_, _) => OpenWeeklyReport();
             _petWindow.HistoryRequested += (_, _) => OpenHistory();
             _petWindow.SettingsRequested += (_, _) => OpenSettings();
+            _petWindow.WindowPickerRequested += (_, _) => OpenWindowPicker();
             _petWindow.SetCurrentCategoryRequested += (_, category) => ApplyCurrentCategory(category);
             _petWindow.HidePetRequested += (_, _) => SetPetVisible(false);
             _petWindow.ExitRequested += (_, _) => Shutdown();
@@ -492,6 +496,30 @@ public partial class App : Application
             MainWindow = window;
         }
 
+        window.Show();
+        window.Activate();
+    }
+
+    /// <summary>
+    /// 用户主动打开的窗口选择器：一次性枚举当前可见窗口，给后台/非前台窗口建规则。
+    /// 红线：标题仅本次界面内存显示，不写日志、不落库；规则只保存用户确认的字符串。
+    /// </summary>
+    private void OpenWindowPicker()
+    {
+        if (_rules is null || _appRules is null)
+        {
+            return;
+        }
+
+        if (_windowPickerWindow is { IsVisible: true })
+        {
+            _windowPickerWindow.Activate();
+            return;
+        }
+
+        var window = new WindowPickerWindow(_rules, () => _appRules.Reload());
+        window.Closed += (_, _) => _windowPickerWindow = null;
+        _windowPickerWindow = window;
         window.Show();
         window.Activate();
     }

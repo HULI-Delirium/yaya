@@ -48,6 +48,9 @@ public partial class PetWindow : Window
     /// <summary>点击 Uncertain 角标，请求打开「为什么」浮层。</summary>
     public event EventHandler? WhyRequested;
 
+    /// <summary>请求打开「选择窗口…」。</summary>
+    public event EventHandler? WindowPickerRequested;
+
     public event EventHandler? HidePetRequested;
 
     public event EventHandler? ExitRequested;
@@ -228,6 +231,9 @@ public partial class PetWindow : Window
             SetCurrentCategoryRequested?.Invoke(this, category);
         }
     }
+
+    private void OnMenuPickWindow(object sender, RoutedEventArgs e) =>
+        WindowPickerRequested?.Invoke(this, EventArgs.Empty);
 
     private void OnMenuTogglePetVisibility(object sender, RoutedEventArgs e) =>
         HidePetRequested?.Invoke(this, EventArgs.Empty);
