@@ -175,6 +175,25 @@
             </Grid>
         </Grid>
 
+        <!-- Uncertain 角标：只做标识，不改姿态；点击打开「为什么」浮层 -->
+        <Border x:Name="UncertainBadge" Width="18" Height="18" CornerRadius="9"
+                Background="#FFF0B429" HorizontalAlignment="Right" VerticalAlignment="Top"
+                Margin="0,162,8,0" Cursor="Hand" ToolTip="不确定，点我看原因"
+                MouseLeftButtonUp="OnUncertainBadgeClick">
+            <Border.Style>
+                <Style TargetType="Border">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsUncertain}" Value="True">
+                            <Setter Property="Visibility" Value="Visible" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Border.Style>
+            <TextBlock Text="?" Foreground="White" FontWeight="Bold" FontSize="11"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+        </Border>
+
         <!-- 轻干预气泡：常驻透明区（Opacity 由 DataTrigger 驱动，0.3s 淡入/淡出） -->
         <Border VerticalAlignment="Top" Margin="6,30,6,0"
                 Background="#D9FFFFFF" CornerRadius="8" Padding="8"
@@ -212,5 +231,67 @@
                 </StackPanel>
             </StackPanel>
         </Border>
+
+        <!-- 纠错后的规则建议：只建议，不自动加规则 -->
+        <Border VerticalAlignment="Top" Margin="6,30,6,0"
+                Background="#D9FFF8E1" BorderBrush="#FFF0B429" BorderThickness="1"
+                CornerRadius="8" Padding="8">
+            <Border.Style>
+                <Style TargetType="Border">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsSuggestionVisible}" Value="True">
+                            <Setter Property="Visibility" Value="Visible" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Border.Style>
+            <StackPanel>
+                <TextBlock Text="{Binding SuggestionText}" TextWrapping="Wrap" FontSize="12" />
+                <StackPanel Orientation="Horizontal" Margin="0,6,0,0" HorizontalAlignment="Center">
+                    <Button Content="设为学习" FontSize="11" Padding="6,2"
+                            Command="{Binding AcceptRuleSuggestionCommand}" />
+                    <Button Content="不用" FontSize="11" Padding="6,2" Margin="6,0,0,0"
+                            Command="{Binding DismissRuleSuggestionCommand}" />
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- 「为什么」浮层：WPF Popup（非独立 Window，不占任务栏） -->
+        <Popup x:Name="WhyPopup" Placement="MousePoint" StaysOpen="False"
+               AllowsTransparency="True" PopupAnimation="Fade">
+            <Border Width="300" Background="White" BorderBrush="#FFD0D0D0" BorderThickness="1"
+                    CornerRadius="8" Padding="12">
+                <StackPanel>
+                    <TextBlock Text="芽芽现在看到" FontSize="13" FontWeight="Bold" />
+                    <TextBlock x:Name="WhyProcessText" FontSize="12" Margin="0,6,0,0"
+                               TextWrapping="Wrap" />
+                    <TextBlock x:Name="WhyCategoryText" FontSize="12" Margin="0,3,0,0"
+                               TextWrapping="Wrap" />
+                    <TextBlock x:Name="WhyStateText" FontSize="12" Margin="0,3,0,0" />
+                    <TextBlock x:Name="WhyReasonText" FontSize="11" Foreground="Gray"
+                               TextWrapping="Wrap" Margin="0,4,0,0" />
+                    <WrapPanel x:Name="WhyCategoryPanel" Margin="0,8,0,0">
+                        <Button Content="学习" FontSize="11" Padding="5,2" Margin="0,0,4,4"
+                                Tag="Study" Click="OnWhySetCategory" />
+                        <Button Content="工具" FontSize="11" Padding="5,2" Margin="0,0,4,4"
+                                Tag="Utility" Click="OnWhySetCategory" />
+                        <Button Content="娱乐" FontSize="11" Padding="5,2" Margin="0,0,4,4"
+                                Tag="Entertainment" Click="OnWhySetCategory" />
+                        <Button Content="社交" FontSize="11" Padding="5,2" Margin="0,0,4,4"
+                                Tag="Social" Click="OnWhySetCategory" />
+                        <Button Content="不打扰" FontSize="11" Padding="5,2" Margin="0,0,4,4"
+                                Tag="Ignore" Click="OnWhySetCategory" />
+                    </WrapPanel>
+                    <TextBlock x:Name="WhyBrowserHint" FontSize="11" Foreground="Gray"
+                               TextWrapping="Wrap" Margin="0,6,0,0"
+                               Text="浏览器窗口请用标题规则（设置里添加站点词）。" />
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+                        <Button Content="打开设置…" FontSize="11" Padding="6,2" Click="OnWhyOpenSettings" />
+                        <Button Content="关闭" FontSize="11" Padding="6,2" Margin="6,0,0,0" Click="OnWhyClose" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Popup>
     </Grid>
 </Window>

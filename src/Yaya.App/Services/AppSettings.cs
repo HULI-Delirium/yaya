@@ -40,6 +40,12 @@ public sealed class AppSettings
     /// <summary>免打扰结束时刻（HH:mm）。</summary>
     public string QuietEnd { get; set; } = "07:00";
 
+    /// <summary>
+    /// 诊断日志：开启后本地日志会记录窗口标题（默认关闭，仅排障用）。
+    /// 红线：标题永不落库、不导出、不进提醒；关闭时只记进程名/类别/来源。
+    /// </summary>
+    public bool DiagnosticLogging { get; set; }
+
     /// <summary>轻问展示计数所属本地日期（yyyy-MM-dd；跨天归零）。</summary>
     public string NudgeCountDate { get; set; } = string.Empty;
 

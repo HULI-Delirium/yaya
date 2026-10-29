@@ -10,6 +10,15 @@ using Yaya.Core.Monitoring;
 
 namespace Yaya.App;
 
+/// <summary>「为什么」浮层数据快照（只含进程名/类别/原因，不含整条标题）。</summary>
+public sealed record WhyInfo(
+    string ProcessText,
+    string CategoryText,
+    string StateText,
+    string ReasonText,
+    string HintText,
+    bool CanSet);
+
 public partial class PetWindow : Window
 {
     // 单击/拖动判定阈值（TODO(校准)：真机手感，4px/300ms 起步）
@@ -35,6 +44,9 @@ public partial class PetWindow : Window
 
     /// <summary>「把当前应用设为…」：只抛类别，进程名与规则写入由 App 层负责。</summary>
     public event EventHandler<RuleCategory>? SetCurrentCategoryRequested;
+
+    /// <summary>点击 Uncertain 角标，请求打开「为什么」浮层。</summary>
+    public event EventHandler? WhyRequested;
 
     public event EventHandler? HidePetRequested;
 
@@ -64,6 +76,60 @@ public partial class PetWindow : Window
         KeyDown += OnDevKeyDown;
 #endif
     }
+
+    /// <summary>「为什么」浮层是否打开（App 用来决定是否随分类/状态刷新）。</summary>
+    public bool IsWhyOpen => WhyPopup.IsOpen;
+
+    /// <summary>显示「为什么」浮层（App 传入当前分类/状态快照）。</summary>
+    public void ShowWhy(WhyInfo info)
+    {
+        ApplyWhy(info);
+        WhyPopup.IsOpen = true;
+    }
+
+    /// <summary>浮层打开期间刷新内容；未打开时忽略。</summary>
+    public void UpdateWhy(WhyInfo info)
+    {
+        if (WhyPopup.IsOpen)
+        {
+            ApplyWhy(info);
+        }
+    }
+
+    private void ApplyWhy(WhyInfo info)
+    {
+        WhyProcessText.Text = $"前台：{info.ProcessText}";
+        WhyCategoryText.Text = $"类别：{info.CategoryText}";
+        WhyStateText.Text = $"判定：{info.StateText}";
+        WhyReasonText.Text = $"原因：{info.ReasonText}";
+        WhyCategoryPanel.Visibility = info.CanSet ? Visibility.Visible : Visibility.Collapsed;
+        WhyBrowserHint.Text = info.HintText;
+        WhyBrowserHint.Visibility = info.CanSet ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void OnUncertainBadgeClick(object sender, MouseButtonEventArgs e)
+    {
+        WhyRequested?.Invoke(this, EventArgs.Empty);
+        e.Handled = true;
+    }
+
+    private void OnWhySetCategory(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string tag }
+            && Enum.TryParse<RuleCategory>(tag, out var category))
+        {
+            WhyPopup.IsOpen = false;
+            SetCurrentCategoryRequested?.Invoke(this, category);
+        }
+    }
+
+    private void OnWhyOpenSettings(object sender, RoutedEventArgs e)
+    {
+        WhyPopup.IsOpen = false;
+        SettingsRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void OnWhyClose(object sender, RoutedEventArgs e) => WhyPopup.IsOpen = false;
 
     /// <summary>菜单标题随番茄相位切换（由 App 每秒刷新）。</summary>
     public void UpdatePomodoroMenuHeader(string header) => PetPomodoroMenuItem.Header = header;

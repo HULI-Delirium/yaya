@@ -2,7 +2,9 @@ using System.IO;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Serilog;
+using Yaya.Core.Monitoring;
 using Yaya.Core.Storage;
 
 namespace Yaya.App.Services;
@@ -18,10 +20,12 @@ public static class DataExporter
         WriteIndented = true,
         // 中文不转 \uXXXX，便于用户直接查看导出文件
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        // 规则里的类别/目标/匹配用字符串，和 rules.json 保持一致
+        Converters = { new JsonStringEnumConverter(allowIntegerValues: false) },
     };
 
-    /// <summary>JSON 全量导出：events + corrections + daily_summary + settings（api_key 已剔除）。</summary>
-    public static string BuildJson(YayaDb db, AppSettings settings)
+    /// <summary>JSON 全量导出：events + corrections + daily_summary + rules + settings（api_key 已剔除）。</summary>
+    public static string BuildJson(YayaDb db, AppSettings settings, IReadOnlyList<CategoryRule>? rules = null)
     {
         var safeSettings = new AppSettings
         {
@@ -34,6 +38,7 @@ public static class DataExporter
             QuietHoursEnabled = settings.QuietHoursEnabled,
             QuietStart = settings.QuietStart,
             QuietEnd = settings.QuietEnd,
+            DiagnosticLogging = settings.DiagnosticLogging,
             FocusMinutes = settings.FocusMinutes,
             BreakMinutes = settings.BreakMinutes,
             Llm = settings.Llm with { ApiKey = string.Empty },   // 红线：导出剔除 api_key
@@ -45,6 +50,8 @@ public static class DataExporter
             events = db.GetAllEvents(),
             corrections = db.GetAllCorrections(),
             dailySummaries = db.GetAllDailySummaries(),
+            rules = rules ?? Array.Empty<CategoryRule>(),
+            rulesVersion = 1,
             settings = safeSettings,
         };
 

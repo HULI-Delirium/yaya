@@ -200,8 +200,10 @@
                 </StackPanel>
             </GroupBox>
 
+            <CheckBox Content="诊断日志（会记录窗口标题，仅排障用；默认关闭）"
+                      IsChecked="{Binding IsDiagnosticLoggingEnabled}" Margin="0,10,0,0" />
             <TextBlock Text="数据仅保存在本机 %LOCALAPPDATA%\Yaya；一键清空会删除数据与日志，
-                             设置（番茄时长/开关/LLM 配置）保留。"
+                             设置（番茄时长/开关/LLM 配置）与分类规则保留。"
                        FontSize="11" Foreground="Gray" Margin="0,10,0,0" TextWrapping="Wrap" />
         </StackPanel>
     </ScrollViewer>

@@ -195,7 +195,7 @@ public partial class AppRulesViewModel : ObservableObject
         CurrentMatchedSite = result.MatchedSite;
         CanSetCurrent = !string.IsNullOrWhiteSpace(processName) && !isBrowser;
         CurrentAppText = string.IsNullOrWhiteSpace(processName) ? "未识别到前台应用" : processName;
-        CurrentCategoryText = BuildCategoryText(result);
+        CurrentCategoryText = DescribeCategory(result);
         CurrentReasonText = result.Reason;
     }
 
@@ -334,7 +334,8 @@ public partial class AppRulesViewModel : ObservableObject
             .Concat(TitleRules.Select(row => row.Rule))
             .ToList();
 
-    private static string BuildCategoryText(ClassificationResult result)
+    /// <summary>把分类结果变成设置页/浮层共用的一句类别描述（含来源，不含标题）。</summary>
+    public static string DescribeCategory(ClassificationResult result)
     {
         if (result.IsMuted)
         {

@@ -62,11 +62,24 @@ public partial class PetViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _pomodoroStatusText = string.Empty;
 
+    /// <summary>当前是否 Uncertain：只驱动宠物上的「?」角标，不改变姿态。</summary>
+    [ObservableProperty]
+    private bool _isUncertain;
+
+    /// <summary>纠错后的规则建议气泡（只建议，不自动加规则）。</summary>
+    [ObservableProperty]
+    private bool _isSuggestionVisible;
+
+    [ObservableProperty]
+    private string _suggestionText = string.Empty;
+
     private readonly DispatcherTimer _blinkTimer;
     private readonly DispatcherTimer _blinkRevertTimer;
     private readonly DispatcherTimer _transitionGuardTimer;
     private readonly DispatcherTimer _bloomTimer;
     private readonly DispatcherTimer _nudgeAutoCloseTimer;
+    private readonly DispatcherTimer _suggestionAutoCloseTimer;
+    private Action? _onAcceptSuggestion;
 
     public PetViewModel(PetAssets assets, Action<string> onMarkValid, Action<string> onMarkEscape)
     {
@@ -100,6 +113,13 @@ public partial class PetViewModel : ObservableObject, IDisposable
             _nudgeAutoCloseTimer.Stop();
             NudgeVisible = false;
         };
+        _suggestionAutoCloseTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
+        _suggestionAutoCloseTimer.Tick += (_, _) =>
+        {
+            _suggestionAutoCloseTimer.Stop();
+            IsSuggestionVisible = false;
+            _onAcceptSuggestion = null;
+        };
     }
 
     /// <summary>状态机迁移入口（App 订阅 MonitoringLoop 后转发）。Uncertain 不触发姿态变化。</summary>
@@ -132,6 +152,8 @@ public partial class PetViewModel : ObservableObject, IDisposable
     /// <summary>Core 允许询问时由 App 转发；提醒总开关在 App 层过滤（不影响 Core 冷却计数）。</summary>
     public void OnNudgeRequested()
     {
+        // 新的轻问优先于纠错建议，避免两块气泡重叠
+        CloseSuggestion();
         var minutes = _distractedSince is { } since
             ? Math.Max(1, (int)Math.Ceiling((DateTimeOffset.Now - since).TotalMinutes))
             : 1;
@@ -185,6 +207,42 @@ public partial class PetViewModel : ObservableObject, IDisposable
         IsPomodoroStatusVisible = true;
     }
 
+    /// <summary>Uncertain 角标开关（App 每轮 StateEvaluated 驱动；不改姿态）。</summary>
+    public void SetUncertain(bool uncertain) => IsUncertain = uncertain;
+
+    /// <summary>
+    /// 纠错后展示规则建议（只展示，点「设为学习」才落规则）。
+    /// 10 秒无操作自动消失；新轻问到来时让位。
+    /// </summary>
+    public void ShowRuleSuggestion(string text, Action accept)
+    {
+        CloseNudge();
+        _onAcceptSuggestion = accept;
+        SuggestionText = text;
+        IsSuggestionVisible = true;
+        _suggestionAutoCloseTimer.Stop();
+        _suggestionAutoCloseTimer.Start();
+    }
+
+    /// <summary>关闭建议气泡（不影响已写入的规则）。</summary>
+    public void CloseSuggestion()
+    {
+        _suggestionAutoCloseTimer.Stop();
+        IsSuggestionVisible = false;
+        _onAcceptSuggestion = null;
+    }
+
+    [RelayCommand]
+    private void AcceptRuleSuggestion()
+    {
+        var accept = _onAcceptSuggestion;
+        CloseSuggestion();
+        accept?.Invoke();
+    }
+
+    [RelayCommand]
+    private void DismissRuleSuggestion() => CloseSuggestion();
+
     /// <summary>番茄钟休息相位：Relaxed 大幅摇摆（Alert 优先，休息中本就不会有 Alert）。</summary>
     public void SetRelaxed(bool relaxed)
     {
@@ -202,6 +260,7 @@ public partial class PetViewModel : ObservableObject, IDisposable
         _transitionGuardTimer.Stop();
         _bloomTimer.Stop();
         _nudgeAutoCloseTimer.Stop();
+        _suggestionAutoCloseTimer.Stop();
     }
 
     // 蔫：特殊迁移——back 层放 wilt_a、front 层放 wilt_b，由 Healthy→Wilted 迁移做交叉淡化

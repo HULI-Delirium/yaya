@@ -49,6 +49,7 @@ public partial class App : Application
     private MenuItem? _trayPetVisibilityItem;
     private Window? _historyWindow;
     private bool _applyingPetVisible;
+    private readonly HashSet<string> _suggestedProcesses = new(StringComparer.OrdinalIgnoreCase);
 
     // 历史窗数据窗口与条形图上限（App 层展示参数，不进 Core）
     private const int HistoryWindowDays = 14;
@@ -106,9 +107,11 @@ public partial class App : Application
                 openDataFolder: OpenDataFolder,
                 showDataUsage: ShowDataUsage,
                 onLlmChanged: ApplyLlmConfig,
+                onDiagnosticLoggingChanged: ApplyDiagnosticLogging,
                 appRules: _appRules);
             loop = new MonitoringLoop(_db, _viewModel, () => _pomodoro.CurrentPhase,
                 new AppClassifier(_rules.Current));
+            loop.UpdateDiagnosticLogging(_settings.DiagnosticLogging);
             _loop = loop;
 
             // 规则变更 → 热替换分类器；分类变化 → 设置页当前应用卡片
@@ -118,13 +121,34 @@ public partial class App : Application
                 Log.Information("分类规则已更新：{Count} 条", _rules.Current.Count);
             };
             loop.ClassificationChanged += (_, result) =>
+            {
                 _appRules.UpdateCurrent(result, loop.LastProcessName, loop.LastIsBrowserHost);
+                if (_petWindow?.IsWhyOpen == true)
+                {
+                    _petWindow.UpdateWhy(BuildWhyInfo());
+                }
+            };
 
             _petAssets = new PetAssets();
             _petViewModel = new PetViewModel(_petAssets,
-                note => loop.ReportValid(note),
+                note =>
+                {
+                    loop.ReportValid(note);
+                    SuggestRuleAfterValid();
+                },
                 note => loop.ReportEscape(note));
             _petWindow = new PetWindow(_petViewModel);
+
+            // Uncertain 角标每轮刷新（初始就是 Uncertain 也能出现）
+            loop.StateEvaluated += (_, state) =>
+            {
+                _petViewModel.SetUncertain(state == FocusState.Uncertain);
+                if (_petWindow.IsWhyOpen)
+                {
+                    _petWindow.UpdateWhy(BuildWhyInfo());
+                }
+            };
+            _petWindow.WhyRequested += (_, _) => _petWindow.ShowWhy(BuildWhyInfo());
 
             // 桌宠菜单只抛事件，具体行为统一在 App 层（与托盘菜单共用同一套方法）
             _petWindow.TogglePomodoroRequested += (_, _) => TogglePomodoro();
@@ -185,12 +209,12 @@ public partial class App : Application
             _viewModel.QuietStartText = _settings.QuietStart;
             _viewModel.QuietEndText = _settings.QuietEnd;
             _viewModel.IsClickThrough = _settings.ClickThrough;
-            _viewModel.FocusMinutesText = _settings.FocusMinutes.ToString();
-            _viewModel.BreakMinutesText = _settings.BreakMinutes.ToString();
+            _viewModel.LoadPomodoroMinutes(_settings.FocusMinutes, _settings.BreakMinutes);
             _viewModel.DataDirText = DataDir;
             _viewModel.IsLlmEnabled = _settings.Llm.Enabled;
             _viewModel.LlmBaseUrlText = _settings.Llm.BaseUrl.Replace("https://", string.Empty);
             _viewModel.LlmModelText = _settings.Llm.Model;
+            _viewModel.IsDiagnosticLoggingEnabled = _settings.DiagnosticLogging;
             _viewModel.UpdateApiKey(_settings.Llm.ApiKey);   // 回填密码框（等量保存一次，无害）
 
             // 宠物显隐持久化：隐藏后进程与采集继续，托盘/设置可恢复（低打扰红线的一部分）
@@ -325,6 +349,19 @@ public partial class App : Application
         Log.Information("番茄时长 -> 专注 {Focus}min / 休息 {Break}min", focusMinutes, breakMinutes);
     }
 
+    private void ApplyDiagnosticLogging(bool enabled)
+    {
+        if (_settings is null)
+        {
+            return;
+        }
+
+        _settings.DiagnosticLogging = enabled;
+        _settings.Save(DataDir);
+        _loop?.UpdateDiagnosticLogging(enabled);
+        Log.Information("诊断日志 -> {Enabled}", enabled);
+    }
+
     // 红线：日志只记 enabled/base/model，绝不记 api_key
     private void ApplyLlmConfig(bool enabled, string baseUrlText, string model, string apiKey)
     {
@@ -382,7 +419,7 @@ public partial class App : Application
 
         try
         {
-            var path = DataExporter.WriteToFile(DataExporter.BuildJson(_db, _settings), DataDir, "json");
+            var path = DataExporter.WriteToFile(DataExporter.BuildJson(_db, _settings, _rules?.Current), DataDir, "json");
             _trayIcon?.ShowBalloonTip("芽芽", $"已导出 JSON（api_key 已剔除）：\r\n{path}", BalloonIcon.Info);
         }
         catch (Exception ex)
@@ -511,6 +548,76 @@ public partial class App : Application
         RuleCategory.Social => "社交",
         _ => "不打扰",
     };
+
+    // 纠正为「有效查资料」后，只在非浏览器、娱乐/社交、且该进程无规则时建议一次
+    private void SuggestRuleAfterValid()
+    {
+        if (_petViewModel is null || _rules is null || _loop is null)
+        {
+            return;
+        }
+
+        var result = _loop.LastClassification;
+        var process = _loop.LastProcessName;
+        if (string.IsNullOrWhiteSpace(process) || _loop.LastIsBrowserHost)
+        {
+            return;
+        }
+
+        if (result.Category is not (AppCategory.Entertainment or AppCategory.Social))
+        {
+            return;
+        }
+
+        if (result.IsMuted || _rules.HasProcessRule(process) || !_suggestedProcesses.Add(process))
+        {
+            return;
+        }
+
+        _petViewModel.ShowRuleSuggestion(
+            $"刚才那个是 {process}。\r\n以后把 {process} 算作学习？",
+            () =>
+            {
+                _rules.AddProcessRule(process, RuleCategory.Study);
+                _appRules?.Reload();
+                _trayIcon?.ShowBalloonTip("芽芽", $"已设为学习：{process}", BalloonIcon.Info);
+                Log.Information("接受纠错建议：{ProcessName} -> Study", process);
+            });
+    }
+
+    /// <summary>「为什么」浮层快照：进程名/类别/判定/原因，不含整条标题。</summary>
+    private WhyInfo BuildWhyInfo()
+    {
+        var result = _loop?.LastClassification ?? ClassificationResult.Unknown("尚未采集");
+        var process = _loop?.LastProcessName ?? string.Empty;
+        var browser = _loop?.LastIsBrowserHost == true;
+        var state = _loop?.CurrentState ?? FocusState.Uncertain;
+        var stateText = state switch
+        {
+            FocusState.Focused => "专注",
+            FocusState.Distracted => "游离",
+            _ => "不确定 — 不打扰",
+        };
+        var hasProcess = !string.IsNullOrWhiteSpace(process);
+        var processText = hasProcess
+            ? browser
+                ? $"浏览器窗口（{result.MatchedSite ?? "未命中站点"}）"
+                : process
+            : "未识别到前台应用";
+        var hint = !hasProcess
+            ? "还没识别到前台应用，等等再看。"
+            : browser
+                ? "浏览器窗口请用标题规则（设置里添加站点词）。"
+                : string.Empty;
+
+        return new WhyInfo(
+            processText,
+            AppRulesViewModel.DescribeCategory(result),
+            stateText,
+            result.Reason,
+            hint,
+            hasProcess && !browser);
+    }
 
     // ---------- 番茄控制（桌宠菜单 / 托盘共用） ----------
 

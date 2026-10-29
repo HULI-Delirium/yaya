@@ -23,6 +23,7 @@ public partial class MainViewModel : ObservableObject
     private readonly Action _openDataFolder;
     private readonly Action _showDataUsage;
     private readonly Action<bool, string, string, string> _onLlmChanged;   // enabled, baseUrl, model, apiKey
+    private readonly Action<bool> _onDiagnosticLoggingChanged;
 
     public MainViewModel(
         Action<bool> onMonitoringChanged,
@@ -37,9 +38,11 @@ public partial class MainViewModel : ObservableObject
         Action openDataFolder,
         Action showDataUsage,
         Action<bool, string, string, string> onLlmChanged,
+        Action<bool> onDiagnosticLoggingChanged,
         AppRulesViewModel appRules)
     {
         AppRules = appRules;
+        _onDiagnosticLoggingChanged = onDiagnosticLoggingChanged;
         _onMonitoringChanged = onMonitoringChanged;
         _onNudgeChanged = onNudgeChanged;
         _onPetVisibleChanged = onPetVisibleChanged;
@@ -103,6 +106,9 @@ public partial class MainViewModel : ObservableObject
     private string _dataDirText = string.Empty;
 
     [ObservableProperty]
+    private bool _isDiagnosticLoggingEnabled;
+
+    [ObservableProperty]
     private bool _isLlmEnabled;
 
     /// <summary>Base URL 展示值（不含 https:// 前缀，输入框自带）。</summary>
@@ -114,8 +120,29 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>api_key 仅内存流转（密码框不回显绑定）；日志绝不打印（红线）。</summary>
     private string _llmApiKey = string.Empty;
+    private bool _suppressPomodoroCallback;
 
     internal string CurrentApiKey => _llmApiKey;
+
+    /// <summary>
+    /// 启动时一次性回填两个番茄时长框，期间抑制回调；避免「先设专注、休息还是默认值」
+    /// 把用户自定义休息时长覆盖掉。回填完再统一校验回调一次。
+    /// </summary>
+    public void LoadPomodoroMinutes(int focusMinutes, int breakMinutes)
+    {
+        _suppressPomodoroCallback = true;
+        try
+        {
+            FocusMinutesText = focusMinutes.ToString();
+            BreakMinutesText = breakMinutes.ToString();
+        }
+        finally
+        {
+            _suppressPomodoroCallback = false;
+        }
+
+        NotifyPomodoroMinutes();
+    }
 
     public void UpdateApiKey(string apiKey)
     {
@@ -143,6 +170,8 @@ public partial class MainViewModel : ObservableObject
 
     partial void OnBreakMinutesTextChanged(string value) => NotifyPomodoroMinutes();
 
+    partial void OnIsDiagnosticLoggingEnabledChanged(bool value) => _onDiagnosticLoggingChanged(value);
+
     partial void OnIsLlmEnabledChanged(bool value) => NotifyLlmChanged();
 
     partial void OnLlmBaseUrlTextChanged(string value) => NotifyLlmChanged();
@@ -167,6 +196,11 @@ public partial class MainViewModel : ObservableObject
     // 两个框都解析为 1–120 的整数时才回调（输入过程中不完整不触发）
     private void NotifyPomodoroMinutes()
     {
+        if (_suppressPomodoroCallback)
+        {
+            return;
+        }
+
         if (int.TryParse(FocusMinutesText, out var focus) && int.TryParse(BreakMinutesText, out var breakMinutes)
             && focus is >= 1 and <= 120 && breakMinutes is >= 1 and <= 120)
         {

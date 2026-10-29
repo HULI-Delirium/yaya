@@ -24,6 +24,7 @@ public sealed class MonitoringLoop : IDisposable
     private readonly DispatcherTimer _timer;
     private readonly FocusStateMachine _machine;
     private AppClassifier _classifier;
+    private bool _diagnosticLogging;
     private bool _timerRunning;
     private bool _disposed;
 
@@ -83,6 +84,9 @@ public sealed class MonitoringLoop : IDisposable
     /// <summary>规则变更后热替换分类器（UI 线程调用）。</summary>
     public void UpdateClassifier(AppClassifier classifier) =>
         _classifier = classifier ?? throw new ArgumentNullException(nameof(classifier));
+
+    /// <summary>诊断开关：开启后才把窗口标题写入本地日志（默认关闭，红线）。</summary>
+    public void UpdateDiagnosticLogging(bool enabled) => _diagnosticLogging = enabled;
 
     public void Start()
     {
@@ -195,6 +199,13 @@ public sealed class MonitoringLoop : IDisposable
             var category = classification.Category;
             _lastCategory = category;
             PublishClassification(processName, classification);
+
+            // 红线：标题默认不进日志；仅用户显式开启诊断时才写（且截断到 512 字符）
+            if (_diagnosticLogging && title.Length > 0)
+            {
+                var snippet = title.Length > 512 ? title[..512] : title;
+                Log.Debug("诊断上下文：标题长度 {Length}，标题 {Title}", title.Length, snippet);
+            }
 
             // 相位由番茄钟服务动态供给（未接入时恒为 None，行为与 v1 一致）
             var idleMilliseconds = (long)(idleSeconds * 1000);
