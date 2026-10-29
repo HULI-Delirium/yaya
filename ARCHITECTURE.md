@@ -32,7 +32,32 @@ Core 的任何行为变更必须伴随 `Yaya.Core.Tests` 中的单元测试。
 | 前台进程名 | `GetWindowThreadProcessId` → `Process.ProcessName`（只读元数据） | 仅用于类别映射，不枚举进程、不读模块/路径 |
 | 键鼠空闲时长 | `GetLastInputInfo` 系统级计数差 | 不记录按键内容、不装键盘钩子 |
 
-**不截屏、不读摄像头、不读麦克风。** 分类用进程名映射（`AppCatalog`），浏览器等宿主进程退回标题关键词兜底；数据只写本机 SQLite。
+**不截屏、不读摄像头、不读麦克风。** 数据只写本机 SQLite。
+
+### 2.1 分类解析（2026-10-29 实施）
+
+解析顺序（先命中先返回）：
+
+1. **用户进程规则**（`rules.json`，同组按列表顺序）；
+2. **用户标题规则**（默认仅浏览器，可勾「所有窗口」）；
+3. **内置进程表**（`AppCatalog`，含 `DeepSeek Harness → Utility`）；
+4. **内置站点词表**（`SiteCatalog`，仅浏览器宿主，标题清洗后按词长降序）；
+5. 浏览器兜底 → `Unknown`；
+6. 其他未知 → `Unknown`。
+
+红线与约定：
+
+- 只读进程名 + 标题文本，**不读 URL、不读页面内容、不做域名识别**；
+- 站点词只认站名，不猜语义（标题没有站名就 `Unknown`，让用户补规则）；
+- `rules.json` 在 `%LOCALAPPDATA%\Yaya\`，版本化、原子写、损坏降级；**只存用户输入的字符串**，
+  不存标题/路径/URL；
+- 「不打扰」（`Ignore`）映射 `Unknown`：不计入专注，也不触发轻问；
+- 分类结果 `ClassificationResult` 带来源/规则 Id/站点/原因，UI 可见；原因（含规则值/进程名）
+  **不进日志**。
+
+**日志口径**：常规 Info/Debug 只记进程名、类别、来源、规则 Id、空闲毫秒；
+**窗口标题默认不写日志**。仅当用户在设置里显式开启「诊断日志」（`DiagnosticLogging`，默认 false）
+时才写入截断后的标题；标题永不落库、不导出、不进提醒气泡。
 
 ## 3. 三态状态机（`FocusStateMachine` v2，纯逻辑可单测）
 
@@ -151,7 +176,8 @@ events/corrections 只在状态迁移、纠正与番茄完成/中断时写入（
 老核显机器因 WPF 动画软渲染出现 9.47% 属硬件代差，非代码缺陷，优化决策已取消）。
 
 - 前台切换宽限期已实现（`CategorySwitchGraceMilliseconds`）；连续 N 次一致样本才迁移的状态滞回仍是 TODO。
-- 进程名映射表与浏览器标题兜底已实现（`AppCatalog`）；词表为占位，TODO：用户自定义词表 + 从 corrections 学习。
+- 进程名映射表、浏览器站点词表与用户自定义规则已实现（`AppCatalog` / `SiteCatalog` /
+  `AppClassifier` + `rules.json`）；「从 corrections 自动学习」仍不做（只建议、不自动，防悄悄改判定）。
 - 番茄钟已接入（`PomodoroService` → 相位注入）；时长设置存 settings.json；「明天开始」为单次覆盖不回写默认。
 - 复盘当日缓存冻结；若未来需要"当日二次聚合"，再加失效策略（TODO）。
 - App 单进程单 UI 线程写库；若未来 tick 变重或加后台服务，再评估 PeriodicTimer + WAL。
