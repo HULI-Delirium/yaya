@@ -176,6 +176,8 @@ events/corrections 只在状态迁移、纠正与番茄完成/中断时写入（
 无增长型内存缓存；`MonitoringLoop.Dispose`（写退出事件行）停表退订，App 退出依序释放。
 UI 窗口生命周期：设置窗按需创建（`_settingsWindow`），关闭后再次打开会新建窗口，
 避免对已关闭的 WPF Window 调用 `Show`；`DispatcherUnhandledException` 记录日志并提示，不再静默闪退。
+规则行模板里的 `Run.Text` 显式 `Mode=OneWay`：只读属性 + Run.Text 默认 TwoWay 会在有规则时抛
+`XamlParseException`（2026-10-29 日志确认并修复）。
 
 **NFR 已在参考硬件上验证通过**（2026-10 发布演练）：AMD R7 9700X / Win11 专业版 / 32GB，
 单文件 exe 纯挂机 30 分钟：CPU 均值 0.56%（≤1%）、私有内存均值 140MB、工作集峰值 255.9MB（≤300MB）。
