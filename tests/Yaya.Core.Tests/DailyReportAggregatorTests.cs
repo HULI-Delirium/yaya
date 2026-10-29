@@ -167,4 +167,62 @@ public class DailyReportAggregatorTests
         Assert.Null(data.PeakWindowStart);
         Assert.Equal(12, data.AdviceMinutes);
     }
+
+    [Fact]
+    public void Aggregate_当日生成传入AsOf_尾段截到此刻不膨胀()
+    {
+        var events = new List<EventRow> { E(17, 54, FocusState.Focused) };
+
+        var data = DailyReportAggregator.Aggregate(events, [], Day, Tz, asOfUtc: Utc(18, 5));
+
+        Assert.Equal(11, data.FocusedMinutes);          // 17:54 → 18:05，而不是到 24:00
+        Assert.Equal(TimeSpan.FromHours(17) + TimeSpan.FromMinutes(30), data.PeakWindowStart);
+    }
+
+    [Fact]
+    public void Aggregate_AsOf晚于日界_仍按日界截断()
+    {
+        var events = new List<EventRow> { E(23, 0, FocusState.Focused) };
+
+        var data = DailyReportAggregator.Aggregate(events, [], Day, Tz, asOfUtc: Utc(0, 30, dayOffset: 1));
+
+        Assert.Equal(60, data.FocusedMinutes);          // 23:00 → 24:00
+    }
+
+    [Fact]
+    public void Aggregate_AsOf截断纠正段()
+    {
+        var events = new List<EventRow>
+        {
+            E(14, 0, FocusState.Distracted),
+            E(16, 0, FocusState.Distracted),
+        };
+        var corrections = new List<CorrectionRow>
+        {
+            new(Utc(14, 5), UserCorrectionKind.CountAsValid),
+        };
+
+        var data = DailyReportAggregator.Aggregate(events, corrections, Day, Tz, asOfUtc: Utc(14, 20));
+
+        Assert.Equal(15, data.FocusedMinutes);          // 14:05 → 14:20，而不是 14:35 封顶
+    }
+
+    [Fact]
+    public void Aggregate_AsOf早于首事件_零专注()
+    {
+        var events = new List<EventRow> { E(18, 0, FocusState.Focused) };
+
+        var data = DailyReportAggregator.Aggregate(events, [], Day, Tz, asOfUtc: Utc(17, 0));
+
+        Assert.Equal(0, data.FocusedMinutes);
+        Assert.Null(data.PeakWindowStart);
+    }
+
+    [Fact]
+    public void Aggregate_当前口径版本为2()
+    {
+        var data = DailyReportAggregator.Aggregate([], [], Day, Tz);
+
+        Assert.Equal(DailyReportData.CurrentVersion, data.AggregationVersion);
+    }
 }

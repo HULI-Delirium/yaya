@@ -148,18 +148,20 @@ CREATE TABLE IF NOT EXISTS daily_summary (
 ## 5. 每日复盘（产品红线：必须短，三句话）
 
 打开入口：**每天首次启动**（当日报告已生成则安静不弹）与托盘"今日复盘"。
-缓存语义：当天已缓存（`report_json` 非空且可解析）直接读，**同一天不重复聚合**；当日 24 点后的新 events 归次日。
+缓存语义：当天缓存 `report_json` 的 `AggregationVersion` ≥ 当前版本才直接读，**同一天不重复聚合**；
+旧口径缓存（版本 1）忽略并重算，当日重算后落库覆盖；当日 24 点后的新 events 归次日。
 
 聚合口径（`DailyReportAggregator`，纯函数；`GetEventsForDate` 含次日首行，时区参数化便于测试）：
 
-- **有效专注分钟**：本地日界 00:00–24:00 内 `Focused` 驻留段之和。段长 = 下一事件行时间戳 − 本行；**退出事件行（`AppExit`，MonitoringLoop 退出时写入）截断尾段**，关机后的时间不会算进专注；尾段无后续行时按兜底截止到当日 24:00（应用仍在运行）；跨零点段按 00:00 切开各归各日。
+- **有效专注分钟**：本地日界 00:00–24:00 内 `Focused` 驻留段之和。段长 = 下一事件行时间戳 − 本行；**退出事件行（`AppExit`，MonitoringLoop 退出时写入）截断尾段**，关机后的时间不会算进专注；尾段无后续行时：**历史日截止到当日 24:00；当日报告传入 `asOf`（生成时刻）截到此刻**，绝不把「现在到 24:00」算成专注；跨零点段按 00:00 切开各归各日。
 - **纠正口径**：`corrections` 中 `CountAsValid` 时刻起记 Focused 段（截到下一事件行，**单段封顶 30 分钟**，防手滑刷数）；`Escape` 不反向扣分；`correction_count` 计当日全部纠正。
 - **最强时段**：对齐 30 分钟窗（00:00–00:30、00:30–01:00…）内专注分钟最多者，**并列取最早**；当日无专注为 null。
 - **明天建议**：最强窗后的第一个 Focused 段起点 T（建议分钟 = 该段时长，夹紧 5–60）；找不到则默认"开始时先做最难的 12 分钟"（T=null，12 分钟）。
 
 展示链：`DailyReportData`（结构化聚合结果）→ `IReportWriter.Write` → 恰好三句（硬约束测试）。
 `RuleReportWriter`（规则模板）与 `LlmReportWriter`（可选、默认关闭）实现同一接口，聚合与 UI 均不感知。
-结构化结果以 JSON 落 `daily_summary.report_json`，是规则版与 LLM 版共同的稳定输入。
+结构化结果以 JSON 落 `daily_summary.report_json`，是规则版与 LLM 版共同的稳定输入；
+`AggregationVersion` 只用于缓存口径迁移（不进入 LLM 请求、不展示）。
 
 **LLM 请求体白名单（写死，不得扩字段）**：仅 1 个日期 + 7 个聚合数值字段——
 `focusedMinutes` / `peakWindowStart` / `peakWindowEnd` / `adviceStartTime` / `adviceMinutes` /

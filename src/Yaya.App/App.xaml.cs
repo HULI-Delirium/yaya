@@ -847,9 +847,13 @@ public partial class App : Application
             ShowWelcome();
         }
 
-        // 每天首次启动（当日复盘尚未生成）自动弹出；已有缓存则安静，走托盘可再看
+        // 每天首次启动（当日复盘尚未生成，或缓存是旧聚合口径）自动弹出并重算；
+        // 当前口径缓存则安静，走托盘可再看
         var today = DateOnly.FromDateTime(DateTime.Now);
-        if (!_db.TryGetDailyReport(today, out _, out _))
+        var hasCurrentCache = _db.TryGetDailyReport(today, out var cached, out _)
+            && cached is not null
+            && cached.AggregationVersion >= DailyReportData.CurrentVersion;
+        if (!hasCurrentCache)
         {
             OpenDailyReport();
         }
@@ -922,11 +926,15 @@ public partial class App : Application
         }
 
         var today = DateOnly.FromDateTime(DateTime.Now);
-        if (!_db.TryGetDailyReport(today, out var data, out var summary) || data is null || summary is null)
+        if (!_db.TryGetDailyReport(today, out var data, out var summary)
+            || data is null || summary is null
+            || data.AggregationVersion < DailyReportData.CurrentVersion)
         {
             var events = _db.GetEventsForDate(today, TimeZoneInfo.Local);
             var corrections = _db.GetCorrectionsForDate(today, TimeZoneInfo.Local);
-            data = DailyReportAggregator.Aggregate(events, corrections, today, TimeZoneInfo.Local);
+            // 当日生成：尾段截到此刻，避免把「现在到 24:00」算成专注
+            data = DailyReportAggregator.Aggregate(events, corrections, today, TimeZoneInfo.Local,
+                asOfUtc: DateTimeOffset.Now);
             // LLM 开关即时生效：仅影响"当日首次生成"的 writer 选择；当天已冻结的报告不回头重写
             summary = ReportWriterFactory.Create(_settings.Llm).Write(data);
             _db.SaveDailyReport(today, data, summary);
@@ -994,7 +1002,10 @@ public partial class App : Application
             var day = today.AddDays(-i);
             DailyReportData? data = null;
             string? summary = null;
-            if (_db!.TryGetDailyReport(day, out var cached, out var cachedText) && cached is not null)
+            var hasCurrentCache = _db!.TryGetDailyReport(day, out var cached, out var cachedText)
+                && cached is not null
+                && cached.AggregationVersion >= DailyReportData.CurrentVersion;
+            if (hasCurrentCache)
             {
                 data = cached;
                 summary = cachedText;
@@ -1005,7 +1016,9 @@ public partial class App : Application
                 var corrections = _db.GetCorrectionsForDate(day, TimeZoneInfo.Local);
                 if (events.Count > 0 || corrections.Count > 0)
                 {
-                    data = DailyReportAggregator.Aggregate(events, corrections, day, TimeZoneInfo.Local);
+                    // 旧口径缓存忽略；今天截到此刻，历史日按日界
+                    data = DailyReportAggregator.Aggregate(events, corrections, day, TimeZoneInfo.Local,
+                        asOfUtc: day == today ? DateTimeOffset.Now : null);
                 }
             }
 
@@ -1115,14 +1128,17 @@ public partial class App : Application
 
     private IReadOnlyList<DailyReportData?>? cachedReports;
 
-    // 7 天日聚合：有当日缓存（daily_summary.report_json）直接用，缺失的现场聚合
+    // 7 天日聚合：当前口径缓存直接用；旧口径缓存/缺失的现场聚合
     private IReadOnlyList<DailyReportData?> BuildWeekReports(DateOnly weekStart)
     {
+        var today = DateOnly.FromDateTime(DateTime.Now);
         var reports = new List<DailyReportData?>(7);
         for (var i = 0; i < 7; i++)
         {
             var day = weekStart.AddDays(i);
-            if (_db!.TryGetDailyReport(day, out var cached, out _) && cached is not null)
+            if (_db!.TryGetDailyReport(day, out var cached, out _)
+                && cached is not null
+                && cached.AggregationVersion >= DailyReportData.CurrentVersion)
             {
                 reports.Add(cached);
                 continue;
@@ -1132,7 +1148,8 @@ public partial class App : Application
             var corrections = _db.GetCorrectionsForDate(day, TimeZoneInfo.Local);
             reports.Add(events.Count == 0 && corrections.Count == 0
                 ? null
-                : DailyReportAggregator.Aggregate(events, corrections, day, TimeZoneInfo.Local));
+                : DailyReportAggregator.Aggregate(events, corrections, day, TimeZoneInfo.Local,
+                    asOfUtc: day == today ? DateTimeOffset.Now : null));
         }
 
         return reports;

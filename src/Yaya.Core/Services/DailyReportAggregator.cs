@@ -20,14 +20,30 @@ public static class DailyReportAggregator
     private const int AdviceMaxMinutes = 60;
     private const double CorrectionSegmentCapMinutes = 30;
 
+    /// <param name="asOfUtc">
+    /// 生成报告的当前时刻（UTC）。当日报告在启动时生成时传入，尾段/纠正段截到此刻，
+    /// 不再把「现在到 24:00」算成专注；历史日传 null（按日界）。
+    /// </param>
     public static DailyReportData Aggregate(
         IReadOnlyList<EventRow> events,
         IReadOnlyList<CorrectionRow> corrections,
         DateOnly date,
-        TimeZoneInfo timeZone)
+        TimeZoneInfo timeZone,
+        DateTimeOffset? asOfUtc = null)
     {
         var dayStart = date.ToDateTime(TimeOnly.MinValue);
         var dayEnd = dayStart.AddDays(1);
+
+        // 当日生成日报时，未来的时间不能算进专注；asOf 晚于日界则仍按日界
+        var cutoff = dayEnd;
+        if (asOfUtc is { } asOf)
+        {
+            var localAsOf = TimeZoneInfo.ConvertTime(asOf, timeZone).DateTime;
+            if (localAsOf < cutoff)
+            {
+                cutoff = localAsOf;
+            }
+        }
 
         // 事件行 → 本地时间驻留段（每行是其前状态的"段结束时刻"）
         var localTimes = new List<DateTime>(events.Count);
@@ -47,10 +63,10 @@ public static class DailyReportAggregator
             segState = row.State;
         }
 
-        // 尾段：当日最后一行之后无行 → 截止到日界（应用退出时的 AppExit 行会走上一分支，不会膨胀到这里）
-        if (segStart is { } lastStart)
+        // 尾段：当日最后一行之后无行 → 截止到 cutoff（当日报告截到生成时刻；历史日截到日界）
+        if (segStart is { } lastStart && lastStart < cutoff)
         {
-            segments.Add((lastStart, dayEnd, segState));
+            segments.Add((lastStart, cutoff, segState));
         }
 
         var focusedMinutes = 0d;
@@ -58,7 +74,7 @@ public static class DailyReportAggregator
         foreach (var (start, end, state) in segments)
         {
             var clampedStart = start < dayStart ? dayStart : start;
-            var clampedEnd = end > dayEnd ? dayEnd : end;
+            var clampedEnd = end > cutoff ? cutoff : end;
             if (clampedEnd <= clampedStart)
             {
                 continue;
@@ -89,7 +105,7 @@ public static class DailyReportAggregator
             var start = local < dayStart ? dayStart : local;
             var endByCap = start.AddMinutes(CorrectionSegmentCapMinutes);
             var endByNextEvent = NextEventAfter(localTimes, local);
-            var end = Min(endByCap, endByNextEvent ?? dayEnd, dayEnd);
+            var end = Min(endByCap, endByNextEvent ?? cutoff, cutoff);
             if (end > start)
             {
                 focusedMinutes += (end - start).TotalMinutes;
@@ -130,7 +146,10 @@ public static class DailyReportAggregator
             adviceTime,
             adviceMinutes,
             totalDistracted,
-            corrections.Count);
+            corrections.Count)
+        {
+            AggregationVersion = DailyReportData.CurrentVersion,
+        };
     }
 
     /// <summary>最强 30 分钟对齐窗（当日无 Focused 分钟返回 null；并列取最早）。</summary>
