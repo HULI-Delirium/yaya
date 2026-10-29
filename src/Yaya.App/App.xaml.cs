@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using System.Reflection;
 using System.Windows;
@@ -42,6 +43,15 @@ public partial class App : Application
     private PetWindow? _petWindow;
     private AppSettings? _settings;
     private MenuItem? _trayToggleItem;
+    private MenuItem? _trayPomodoroItem;
+    private MenuItem? _trayPetVisibilityItem;
+    private Window? _historyWindow;
+    private bool _applyingPetVisible;
+
+    // 历史窗数据窗口与条形图上限（App 层展示参数，不进 Core）
+    private const int HistoryWindowDays = 14;
+    private const int HistoryBarMaxWidth = 140;
+    private const int HistoryFocusedDayThresholdMinutes = 30;   // 与 WeeklyReportOptions 默认一致
 
     // 周报当天内存缓存（重复打开同周不重复聚合；不建 weekly 表）
     private (DateOnly weekStart, WeeklyReportData data)? _weeklyCache;
@@ -72,6 +82,8 @@ public partial class App : Application
             _trayIcon.IconSource = LoadTrayIcon();
             // 资源树中的 MenuItem 不生成字段：从 ContextMenu 命名范围查找
             _trayToggleItem = (MenuItem)_trayIcon.ContextMenu.FindName("TrayToggleMonitoringItem")!;
+            _trayPomodoroItem = (MenuItem)_trayIcon.ContextMenu.FindName("TrayPomodoroItem")!;
+            _trayPetVisibilityItem = (MenuItem)_trayIcon.ContextMenu.FindName("TrayPetVisibilityItem")!;
             Log.Information("托盘图标已加载（内嵌占位图标）");
 
             _pomodoro = new PomodoroService(() => _settings.FocusMinutes, () => _settings.BreakMinutes);
@@ -80,6 +92,8 @@ public partial class App : Application
             _viewModel = new MainViewModel(
                 onMonitoringChanged: ApplyMonitoringEnabled,
                 onNudgeChanged: ApplyNudgeEnabled,
+                onPetVisibleChanged: ApplyPetVisible,
+                onNudgeDisplayChanged: ApplyNudgeDisplay,
                 onClickThroughChanged: ApplyClickThrough,
                 onPomodoroMinutesChanged: ApplyPomodoroMinutes,
                 clearData: ConfirmClearData,
@@ -97,11 +111,21 @@ public partial class App : Application
                 note => loop.ReportEscape(note));
             _petWindow = new PetWindow(_petViewModel);
 
+            // 桌宠菜单只抛事件，具体行为统一在 App 层（与托盘菜单共用同一套方法）
+            _petWindow.TogglePomodoroRequested += (_, _) => TogglePomodoro();
+            _petWindow.DailyReportRequested += (_, _) => OpenDailyReport();
+            _petWindow.WeeklyReportRequested += (_, _) => OpenWeeklyReport();
+            _petWindow.HistoryRequested += (_, _) => OpenHistory();
+            _petWindow.SettingsRequested += (_, _) => OpenSettings();
+            _petWindow.HidePetRequested += (_, _) => SetPetVisible(false);
+            _petWindow.ExitRequested += (_, _) => Shutdown();
+
             loop.FocusTransitionOccurred += (_, t) => _petViewModel.OnFocusTransition(t);
             loop.NudgeRequested += (_, _) =>
             {
-                // 提醒总开关只过滤展示；Core 的冷却与计数不受影响
-                if (_settings!.NudgeEnabled)
+                // 展示门控（App 层）：提醒总开关 → 免打扰时段 → 每日上限；
+                // 只过滤展示，Core 的冷却与判定完全不受影响
+                if (_settings!.NudgeEnabled && TryReserveNudgeDisplay())
                 {
                     _petViewModel!.OnNudgeRequested();
                 }
@@ -111,8 +135,11 @@ public partial class App : Application
             _pomodoro.PhaseChanged += phase =>
             {
                 _petViewModel!.SetRelaxed(phase == PomodoroPhase.Break);
+                RefreshPomodoroUi();
                 Log.Information("番茄相位 -> {Phase}", phase);
             };
+            // 每秒刷新状态条/托盘剩余时间（仅 UI 文案，不落库）
+            _pomodoro.RemainingChanged += _ => RefreshPomodoroUi();
             _pomodoro.FocusCompleted += () =>
             {
                 _db!.RecordEvent(DateTimeOffset.UtcNow, AppCategory.Unknown, loop.SessionId, "PomodoroFocusCompleted", 0);
@@ -136,6 +163,11 @@ public partial class App : Application
             // 设置初值（会触发回调完成应用与落盘；Start 幂等，穿透在 Show 后补句柄）
             _viewModel.IsMonitoringEnabled = _settings.MonitoringEnabled;
             _viewModel.IsNudgeEnabled = _settings.NudgeEnabled;
+            _viewModel.IsPetVisible = _settings.PetVisible;
+            _viewModel.NudgeDailyLimitText = _settings.NudgeDailyLimit.ToString();
+            _viewModel.IsQuietHoursEnabled = _settings.QuietHoursEnabled;
+            _viewModel.QuietStartText = _settings.QuietStart;
+            _viewModel.QuietEndText = _settings.QuietEnd;
             _viewModel.IsClickThrough = _settings.ClickThrough;
             _viewModel.FocusMinutesText = _settings.FocusMinutes.ToString();
             _viewModel.BreakMinutesText = _settings.BreakMinutes.ToString();
@@ -145,15 +177,17 @@ public partial class App : Application
             _viewModel.LlmModelText = _settings.Llm.Model;
             _viewModel.UpdateApiKey(_settings.Llm.ApiKey);   // 回填密码框（等量保存一次，无害）
 
-            _petWindow.Show();
-            _petWindow.SetClickThrough(_settings.ClickThrough);
-
-            // 每天首次启动（当日复盘尚未生成）自动弹出；已有缓存则安静，走托盘可再看
-            var today = DateOnly.FromDateTime(DateTime.Now);
-            if (!_db.TryGetDailyReport(today, out _, out _))
+            // 宠物显隐持久化：隐藏后进程与采集继续，托盘/设置可恢复（低打扰红线的一部分）
+            if (_settings.PetVisible)
             {
-                Dispatcher.BeginInvoke(new Action(OpenDailyReport));
+                _petWindow.Show();
             }
+
+            _petWindow.SetClickThrough(_settings.ClickThrough);
+            RefreshPomodoroUi();
+
+            // 首启引导与当日复盘都等首帧后再弹，避免阻塞启动；顺序固定：欢迎 → 复盘
+            Dispatcher.BeginInvoke(new Action(OnFirstRunAndDailyReport));
 
             base.OnStartup(e);
         }
@@ -223,6 +257,25 @@ public partial class App : Application
         Log.Information("提醒开关 -> {Enabled}", enabled);
     }
 
+    // 设置页 ↔ 托盘/桌宠菜单双向同步；重入保护在 SetPetVisible 内（幂等）
+    private void ApplyPetVisible(bool visible) => SetPetVisible(visible);
+
+    private void ApplyNudgeDisplay(int dailyLimit, bool quietEnabled, string quietStart, string quietEnd)
+    {
+        if (_settings is null)
+        {
+            return;
+        }
+
+        _settings.NudgeDailyLimit = Math.Clamp(dailyLimit, 1, 10);
+        _settings.QuietHoursEnabled = quietEnabled;
+        _settings.QuietStart = quietStart;
+        _settings.QuietEnd = quietEnd;
+        _settings.Save(DataDir);
+        Log.Information("提醒门控 -> 每日上限 {Limit}，免打扰 {Enabled}（{Start}–{End}）",
+            _settings.NudgeDailyLimit, quietEnabled, quietStart, quietEnd);
+    }
+
     private void ApplyClickThrough(bool enabled)
     {
         if (_settings is null)
@@ -233,6 +286,12 @@ public partial class App : Application
         _settings.ClickThrough = enabled;
         _settings.Save(DataDir);
         _petWindow?.SetClickThrough(enabled);
+        if (enabled && _petWindow?.IsVisible == true)
+        {
+            // 用户主动开启时才提示（启动恢复配置不打扰）：穿透后菜单不可用，必须先讲清楚
+            _trayIcon?.ShowBalloonTip("芽芽", "已开启鼠标穿透：宠物菜单不可用，可在设置里关闭。", BalloonIcon.Info);
+        }
+
         Log.Information("鼠标穿透 -> {Enabled}", enabled);
     }
 
@@ -246,6 +305,7 @@ public partial class App : Application
         _settings.FocusMinutes = focusMinutes;
         _settings.BreakMinutes = breakMinutes;
         _settings.Save(DataDir);
+        RefreshPomodoroUi();   // 空闲时菜单「开始专注 N 分钟」跟随新时长
         Log.Information("番茄时长 -> 专注 {Focus}min / 休息 {Break}min", focusMinutes, breakMinutes);
     }
 
@@ -347,7 +407,31 @@ public partial class App : Application
         ApplyMonitoringEnabled(!_settings.MonitoringEnabled);
     }
 
-    private void TrayMenuShowSettings(object sender, RoutedEventArgs e)
+    private void TrayMenuTogglePomodoro(object sender, RoutedEventArgs e) => TogglePomodoro();
+
+    private void TrayMenuShowSettings(object sender, RoutedEventArgs e) => OpenSettings();
+
+    private void TrayMenuShowReport(object sender, RoutedEventArgs e) => OpenDailyReport();
+
+    private void TrayMenuShowWeeklyReport(object sender, RoutedEventArgs e) => OpenWeeklyReport();
+
+    private void TrayMenuShowHistory(object sender, RoutedEventArgs e) => OpenHistory();
+
+    private void TrayMenuTogglePetVisibility(object sender, RoutedEventArgs e)
+    {
+        if (_settings is null)
+        {
+            return;
+        }
+
+        SetPetVisible(!_settings.PetVisible);
+    }
+
+    private void TrayMenuClearData(object sender, RoutedEventArgs e) => ConfirmClearData();
+
+    private void TrayMenuExit(object sender, RoutedEventArgs e) => Shutdown();
+
+    private void OpenSettings()
     {
         if (MainWindow is not { } window)
         {
@@ -359,13 +443,231 @@ public partial class App : Application
         window.Activate();
     }
 
-    private void TrayMenuShowReport(object sender, RoutedEventArgs e) => OpenDailyReport();
+    // ---------- 番茄控制（桌宠菜单 / 托盘共用） ----------
 
-    private void TrayMenuShowWeeklyReport(object sender, RoutedEventArgs e) => OpenWeeklyReport();
+    /// <summary>开始/停止番茄：唯一入口收敛在这里，避免两套菜单行为分叉。</summary>
+    private void TogglePomodoro()
+    {
+        if (_pomodoro is null)
+        {
+            return;
+        }
 
-    private void TrayMenuClearData(object sender, RoutedEventArgs e) => ConfirmClearData();
+        if (_pomodoro.CurrentPhase == PomodoroPhase.None)
+        {
+            StartPomodoro();
+            return;
+        }
 
-    private void TrayMenuExit(object sender, RoutedEventArgs e) => Shutdown();
+        _pomodoro.Stop();   // 服务内部写 PomodoroAborted 事件（经 Interrupted 订阅）
+        Log.Information("番茄：手动停止");
+    }
+
+    private void StartPomodoro()
+    {
+        if (_pomodoro is null || _settings is null)
+        {
+            return;
+        }
+
+        _pomodoro.StartFocus();
+        Log.Information("番茄：开始（{Minutes} 分钟）", _settings.FocusMinutes);
+    }
+
+    /// <summary>刷新状态条、托盘提示与两份菜单标题；每秒由 RemainingChanged 调用。</summary>
+    private void RefreshPomodoroUi()
+    {
+        if (_settings is null || _pomodoro is null)
+        {
+            return;
+        }
+
+        var phase = _pomodoro.CurrentPhase;
+        var remaining = phase == PomodoroPhase.None ? TimeSpan.Zero : _pomodoro.Remaining;
+        _petViewModel?.SetPomodoroStatus(phase, remaining);
+
+        var header = phase switch
+        {
+            PomodoroPhase.Focus => $"停止专注 {FormatRemaining(remaining)}",
+            PomodoroPhase.Break => $"停止休息 {FormatRemaining(remaining)}",
+            _ => $"开始专注 {_settings.FocusMinutes} 分钟",
+        };
+        if (_trayPomodoroItem is not null)
+        {
+            _trayPomodoroItem.Header = header;
+        }
+
+        _petWindow?.UpdatePomodoroMenuHeader(header);
+        UpdateTrayTooltip();
+    }
+
+    private static string FormatRemaining(TimeSpan remaining)
+    {
+        var seconds = Math.Max(0, (int)Math.Ceiling(remaining.TotalSeconds));
+        return $"{seconds / 60:00}:{seconds % 60:00}";
+    }
+
+    /// <summary>托盘提示：番茄进行中给剩余时间；空闲且宠物隐藏时明确指路。</summary>
+    private void UpdateTrayTooltip()
+    {
+        if (_trayIcon is null || _settings is null || _pomodoro is null)
+        {
+            return;
+        }
+
+        _trayIcon.ToolTipText = _pomodoro.CurrentPhase switch
+        {
+            PomodoroPhase.Focus => $"芽芽 · 专注 {FormatRemaining(_pomodoro.Remaining)}",
+            PomodoroPhase.Break => $"芽芽 · 休息 {FormatRemaining(_pomodoro.Remaining)}",
+            _ => _settings.PetVisible ? "芽芽 · 学习节律陪伴" : "芽芽 · 宠物已隐藏（托盘菜单可恢复）",
+        };
+    }
+
+    // ---------- 宠物显隐 ----------
+
+    private void SetPetVisible(bool visible)
+    {
+        if (_settings is null || _petWindow is null || _applyingPetVisible)
+        {
+            return;
+        }
+
+        _applyingPetVisible = true;
+        try
+        {
+            _settings.PetVisible = visible;
+            _settings.Save(DataDir);
+            if (visible)
+            {
+                _petWindow.Show();
+                _petWindow.Activate();
+            }
+            else
+            {
+                _petWindow.Hide();
+            }
+
+            // 设置页勾选同步（进入本方法时已置重入标记，回调不会再套一层）
+            if (_viewModel is not null && _viewModel.IsPetVisible != visible)
+            {
+                _viewModel.IsPetVisible = visible;
+            }
+
+            if (_trayPetVisibilityItem is not null)
+            {
+                _trayPetVisibilityItem.Header = visible ? "隐藏宠物" : "显示宠物";
+            }
+
+            _petWindow.UpdatePetVisibilityMenuHeader(visible);
+            UpdateTrayTooltip();
+            Log.Information("宠物显示 -> {Visible}", visible);
+        }
+        finally
+        {
+            _applyingPetVisible = false;
+        }
+    }
+
+    // ---------- 轻问展示门控（App 层，Core 不动） ----------
+
+    /// <summary>
+    /// 免打扰时段一律不展示；每日展示次数按本地日期计数并持久化（重启不重置）。
+    /// 返回 false 只代表「这次不展示」，Core 的冷却与判定照常推进。
+    /// </summary>
+    private bool TryReserveNudgeDisplay()
+    {
+        if (_settings is null)
+        {
+            return false;
+        }
+
+        var now = DateTimeOffset.Now;
+        if (IsInQuietHours(TimeOnly.FromDateTime(now.LocalDateTime)))
+        {
+            Log.Information("轻问未展示：处于免打扰时段");
+            return false;
+        }
+
+        var today = now.LocalDateTime.ToString("yyyy-MM-dd");
+        if (_settings.NudgeCountDate != today)
+        {
+            _settings.NudgeCountDate = today;
+            _settings.NudgeCountToday = 0;
+        }
+
+        var limit = Math.Clamp(_settings.NudgeDailyLimit, 1, 10);
+        if (_settings.NudgeCountToday >= limit)
+        {
+            Log.Information("轻问未展示：已达每日上限 {Limit}", limit);
+            return false;
+        }
+
+        _settings.NudgeCountToday++;
+        _settings.Save(DataDir);
+        Log.Information("轻问展示计数 {Count}/{Limit}", _settings.NudgeCountToday, limit);
+        return true;
+    }
+
+    private bool IsInQuietHours(TimeOnly now)
+    {
+        if (_settings is null || !_settings.QuietHoursEnabled)
+        {
+            return false;
+        }
+
+        if (!TimeOnly.TryParseExact(_settings.QuietStart, "HH:mm", CultureInfo.InvariantCulture,
+                DateTimeStyles.None, out var start)
+            || !TimeOnly.TryParseExact(_settings.QuietEnd, "HH:mm", CultureInfo.InvariantCulture,
+                DateTimeStyles.None, out var end))
+        {
+            return false;   // 配置损坏按不免打扰处理，绝不因设置问题阻塞提醒
+        }
+
+        // 支持跨零点（默认 23:00–07:00）
+        return start <= end
+            ? now >= start && now < end
+            : now >= start || now < end;
+    }
+
+    // ---------- 首启引导 ----------
+
+    private void OnFirstRunAndDailyReport()
+    {
+        if (_settings is null || _db is null)
+        {
+            return;
+        }
+
+        if (!_settings.HasCompletedOnboarding)
+        {
+            ShowWelcome();
+        }
+
+        // 每天首次启动（当日复盘尚未生成）自动弹出；已有缓存则安静，走托盘可再看
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        if (!_db.TryGetDailyReport(today, out _, out _))
+        {
+            OpenDailyReport();
+        }
+    }
+
+    private void ShowWelcome()
+    {
+        if (_settings is null)
+        {
+            return;
+        }
+
+        var welcome = new WelcomeWindow(DataUsageText);
+        welcome.ShowDialog();
+        _settings.HasCompletedOnboarding = true;
+        _settings.Save(DataDir);
+        Log.Information("首次引导已完成（开始第一次专注：{Start}）", welcome.StartFocusRequested);
+        if (welcome.StartFocusRequested)
+        {
+            StartPomodoro();
+        }
+    }
 
     /// <summary>一键清空：二次确认后删空数据库 + 日志；设置（番茄时长/开关/LLM 配置）保留（产品红线）。</summary>
     private void ConfirmClearData()
@@ -446,6 +748,132 @@ public partial class App : Application
             });
         window.Show();
         window.Activate();
+    }
+
+    // ---------- 专注记录（近 14 天，只读） ----------
+
+    private void OpenHistory()
+    {
+        if (_db is null)
+        {
+            return;
+        }
+
+        if (_historyWindow is { IsVisible: true })
+        {
+            _historyWindow.Activate();
+            return;
+        }
+
+        var window = new HistoryWindow();
+        window.DataContext = BuildHistoryViewModel(() =>
+        {
+            StartPomodoro();
+            window.Close();
+        });
+        window.Closed += (_, _) => _historyWindow = null;
+        _historyWindow = window;
+        window.Show();
+        window.Activate();
+    }
+
+    /// <summary>
+    /// 近 14 天视图模型：daily_summary 缓存优先；无缓存但有 events 的日期现算；两者都没有留空。
+    /// 只读，不落库、不改 Core；每行只含聚合数字与本地复盘首句（不含窗口标题/进程名）。
+    /// </summary>
+    private HistoryViewModel BuildHistoryViewModel(Action onStartFocus)
+    {
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        var days = new List<(DateOnly Day, DailyReportData? Data, string? Summary)>(HistoryWindowDays);
+        for (var i = HistoryWindowDays - 1; i >= 0; i--)   // 旧→新，便于算连续天数
+        {
+            var day = today.AddDays(-i);
+            DailyReportData? data = null;
+            string? summary = null;
+            if (_db!.TryGetDailyReport(day, out var cached, out var cachedText) && cached is not null)
+            {
+                data = cached;
+                summary = cachedText;
+            }
+            else
+            {
+                var events = _db.GetEventsForDate(day, TimeZoneInfo.Local);
+                var corrections = _db.GetCorrectionsForDate(day, TimeZoneInfo.Local);
+                if (events.Count > 0 || corrections.Count > 0)
+                {
+                    data = DailyReportAggregator.Aggregate(events, corrections, day, TimeZoneInfo.Local);
+                }
+            }
+
+            days.Add((day, data, summary));
+        }
+
+        var maxMinutes = days.Max(d => d.Data?.FocusedMinutes ?? 0);
+        var rows = new List<HistoryDayRow>(days.Count);
+        for (var i = days.Count - 1; i >= 0; i--)   // 展示新→旧
+        {
+            var (day, data, summary) = days[i];
+            var minutes = data?.FocusedMinutes ?? 0;
+            rows.Add(new HistoryDayRow(
+                $"{day:MM-dd} {WeekdayLabel(day)}",
+                maxMinutes == 0 || minutes == 0
+                    ? 0
+                    : Math.Max(4, (int)Math.Round(HistoryBarMaxWidth * minutes / (double)maxMinutes)),
+                data is null ? "—" : $"{minutes} 分",
+                data is null ? "—" : $"纠正 {data.CorrectionCount} 次",
+                BuildHistoryNote(data, summary),
+                data is null));
+        }
+
+        var total = days.Sum(d => d.Data?.FocusedMinutes ?? 0);
+        var weekStart = today.AddDays(-(((int)today.DayOfWeek + 6) % 7));   // 周一
+        var weekTotal = days.Where(d => d.Day >= weekStart).Sum(d => d.Data?.FocusedMinutes ?? 0);
+
+        var streak = 0;
+        var current = 0;
+        foreach (var (_, data, _) in days)   // 旧→新
+        {
+            if ((data?.FocusedMinutes ?? 0) >= HistoryFocusedDayThresholdMinutes)
+            {
+                current++;
+                streak = Math.Max(streak, current);
+            }
+            else
+            {
+                current = 0;
+            }
+        }
+
+        var average = (int)Math.Round(total / (double)HistoryWindowDays);
+        var isEmpty = days.All(d => d.Data is null);
+        return new HistoryViewModel(
+            rows,
+            $"本周合计 {weekTotal} 分钟",
+            $"近 14 天日均 {average} 分钟",
+            $"最长连续专注 {streak} 天",
+            isEmpty,
+            onStartFocus);
+    }
+
+    private static string WeekdayLabel(DateOnly day) => "周" + "日一二三四五六"[(int)day.DayOfWeek];
+
+    private static string BuildHistoryNote(DailyReportData? data, string? summary)
+    {
+        if (!string.IsNullOrWhiteSpace(summary))
+        {
+            var end = summary.IndexOf('。');
+            var line = end > 0 ? summary[..(end + 1)] : summary;
+            return line.Length > 40 ? line[..40] + "…" : line;
+        }
+
+        if (data is null)
+        {
+            return "无记录";
+        }
+
+        return data.PeakWindowStart is { } start && data.PeakWindowEnd is { } peakEnd
+            ? $"最强的一段 {start.ToString(@"hh\:mm")}–{peakEnd.ToString(@"hh\:mm")}"
+            : "有记录，暂无文字复盘";
     }
 
     // ---------- 本周报告 ----------

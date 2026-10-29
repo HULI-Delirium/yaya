@@ -1,5 +1,7 @@
 using System.ComponentModel;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media.Animation;
 using Yaya.App.Services;
@@ -10,8 +12,30 @@ namespace Yaya.App;
 
 public partial class PetWindow : Window
 {
+    // 单击/拖动判定阈值（TODO(校准)：真机手感，4px/300ms 起步）
+    private const double ClickMoveTolerancePixels = 4;
+    private const long ClickMaxDurationMilliseconds = 300;
+
     private readonly PetViewModel _viewModel;
     private bool _clickThrough;
+    private Point _pressPosition;
+    private long _pressTicks;
+    private bool _dragging;
+
+    /// <summary>菜单「开始/停止专注」：行为由 App 层接线（窗口不持有番茄服务）。</summary>
+    public event EventHandler? TogglePomodoroRequested;
+
+    public event EventHandler? DailyReportRequested;
+
+    public event EventHandler? WeeklyReportRequested;
+
+    public event EventHandler? HistoryRequested;
+
+    public event EventHandler? SettingsRequested;
+
+    public event EventHandler? HidePetRequested;
+
+    public event EventHandler? ExitRequested;
 
     public PetWindow(PetViewModel viewModel)
     {
@@ -26,14 +50,11 @@ public partial class PetWindow : Window
             e.Cancel = true;
             Hide();
         };
-        // 拖动只由宠物区（底部 200x200）触发；鼠标穿透开启时不可拖
-        PetRoot.MouseLeftButtonDown += (_, _) =>
-        {
-            if (!_clickThrough)
-            {
-                DragMove();
-            }
-        };
+        // 宠物区手势：≤4px 且 ≤300ms 视为单击（弹菜单），超过阈值才是拖动；
+        // 鼠标穿透开启时窗口不接收消息，菜单与拖动都不可用（设置页有说明）
+        PetRoot.MouseLeftButtonDown += OnPetMouseLeftButtonDown;
+        PetRoot.MouseMove += OnPetMouseMove;
+        PetRoot.MouseLeftButtonUp += OnPetMouseLeftButtonUp;
 
 #if DEBUG_HOTKEYS
         // 调试热键默认不编译进正式构建（符号开启方式见 Assets/pet/README.txt）
@@ -41,7 +62,102 @@ public partial class PetWindow : Window
 #endif
     }
 
-    /// <summary>鼠标穿透开关：开启后宠物窗不拦截鼠标消息（也不可拖动）。</summary>
+    /// <summary>菜单标题随番茄相位切换（由 App 每秒刷新）。</summary>
+    public void UpdatePomodoroMenuHeader(string header) => PetPomodoroMenuItem.Header = header;
+
+    /// <summary>菜单显隐项随状态切换。</summary>
+    public void UpdatePetVisibilityMenuHeader(bool visible) =>
+        PetVisibilityMenuItem.Header = visible ? "隐藏宠物" : "显示宠物";
+
+    private void OnPetMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (_clickThrough)
+        {
+            return;
+        }
+
+        _pressPosition = e.GetPosition(this);
+        _pressTicks = Environment.TickCount64;
+        _dragging = false;
+    }
+
+    // 超过阈值才进入拖动：原地按住不会触发 DragMove，从而保住单击语义
+    private void OnPetMouseMove(object sender, MouseEventArgs e)
+    {
+        if (_clickThrough || _dragging || e.LeftButton != MouseButtonState.Pressed)
+        {
+            return;
+        }
+
+        var delta = e.GetPosition(this) - _pressPosition;
+        if (Math.Abs(delta.X) <= ClickMoveTolerancePixels && Math.Abs(delta.Y) <= ClickMoveTolerancePixels)
+        {
+            return;
+        }
+
+        _dragging = true;
+        try
+        {
+            DragMove();
+        }
+        catch (InvalidOperationException)
+        {
+            // 按下状态在事件排队期间丢失时 DragMove 会抛；按普通点击处理，不击穿 UI
+            _dragging = false;
+        }
+    }
+
+    private void OnPetMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (_clickThrough)
+        {
+            return;
+        }
+
+        if (_dragging)
+        {
+            _dragging = false;
+            return;
+        }
+
+        if (Environment.TickCount64 - _pressTicks > ClickMaxDurationMilliseconds)
+        {
+            return;
+        }
+
+        var delta = e.GetPosition(this) - _pressPosition;
+        if (Math.Abs(delta.X) > ClickMoveTolerancePixels || Math.Abs(delta.Y) > ClickMoveTolerancePixels)
+        {
+            return;
+        }
+
+        PetMenu.PlacementTarget = PetRoot;
+        PetMenu.Placement = PlacementMode.MousePoint;
+        PetMenu.IsOpen = true;
+    }
+
+    private void OnMenuTogglePomodoro(object sender, RoutedEventArgs e) =>
+        TogglePomodoroRequested?.Invoke(this, EventArgs.Empty);
+
+    private void OnMenuDailyReport(object sender, RoutedEventArgs e) =>
+        DailyReportRequested?.Invoke(this, EventArgs.Empty);
+
+    private void OnMenuWeeklyReport(object sender, RoutedEventArgs e) =>
+        WeeklyReportRequested?.Invoke(this, EventArgs.Empty);
+
+    private void OnMenuHistory(object sender, RoutedEventArgs e) =>
+        HistoryRequested?.Invoke(this, EventArgs.Empty);
+
+    private void OnMenuSettings(object sender, RoutedEventArgs e) =>
+        SettingsRequested?.Invoke(this, EventArgs.Empty);
+
+    private void OnMenuTogglePetVisibility(object sender, RoutedEventArgs e) =>
+        HidePetRequested?.Invoke(this, EventArgs.Empty);
+
+    private void OnMenuExit(object sender, RoutedEventArgs e) =>
+        ExitRequested?.Invoke(this, EventArgs.Empty);
+
+    /// <summary>鼠标穿透开关：开启后宠物窗不拦截鼠标消息（也不可拖动、不可弹菜单）。</summary>
     public void SetClickThrough(bool enabled)
     {
         _clickThrough = enabled;

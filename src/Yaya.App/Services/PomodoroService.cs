@@ -30,6 +30,9 @@ public sealed class PomodoroService : IDisposable
     /// <summary>番茄被中途停止（手动停止或相位内重启前一个）。</summary>
     public event Action? Interrupted;
 
+    /// <summary>剩余时间每秒刷新（宠物状态条/托盘提示用；服务本身仍零 IO）。</summary>
+    public event Action<TimeSpan>? RemainingChanged;
+
     public PomodoroService(Func<int> focusMinutes, Func<int> breakMinutes)
     {
         _focusMinutes = focusMinutes;
@@ -60,6 +63,7 @@ public sealed class PomodoroService : IDisposable
         _timer.Stop();
         Remaining = TimeSpan.Zero;
         SetPhase(PomodoroPhase.None);
+        RemainingChanged?.Invoke(Remaining);
         Interrupted?.Invoke();
     }
 
@@ -82,6 +86,7 @@ public sealed class PomodoroService : IDisposable
     private void Tick()
     {
         Remaining = _phaseEndsAt - DateTimeOffset.Now;
+        RemainingChanged?.Invoke(Remaining);
         if (Remaining > TimeSpan.Zero)
         {
             return;

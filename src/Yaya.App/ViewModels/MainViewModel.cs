@@ -1,3 +1,4 @@
+using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -12,6 +13,8 @@ public partial class MainViewModel : ObservableObject
 {
     private readonly Action<bool> _onMonitoringChanged;
     private readonly Action<bool> _onNudgeChanged;
+    private readonly Action<bool> _onPetVisibleChanged;
+    private readonly Action<int, bool, string, string> _onNudgeDisplayChanged;   // limit, quietEnabled, start, end
     private readonly Action<bool> _onClickThroughChanged;
     private readonly Action<int, int> _onPomodoroMinutesChanged;
     private readonly Action _clearData;
@@ -24,6 +27,8 @@ public partial class MainViewModel : ObservableObject
     public MainViewModel(
         Action<bool> onMonitoringChanged,
         Action<bool> onNudgeChanged,
+        Action<bool> onPetVisibleChanged,
+        Action<int, bool, string, string> onNudgeDisplayChanged,
         Action<bool> onClickThroughChanged,
         Action<int, int> onPomodoroMinutesChanged,
         Action clearData,
@@ -35,6 +40,8 @@ public partial class MainViewModel : ObservableObject
     {
         _onMonitoringChanged = onMonitoringChanged;
         _onNudgeChanged = onNudgeChanged;
+        _onPetVisibleChanged = onPetVisibleChanged;
+        _onNudgeDisplayChanged = onNudgeDisplayChanged;
         _onClickThroughChanged = onClickThroughChanged;
         _onPomodoroMinutesChanged = onPomodoroMinutesChanged;
         _clearData = clearData;
@@ -54,6 +61,26 @@ public partial class MainViewModel : ObservableObject
 
     [ObservableProperty]
     private bool _isNudgeEnabled;
+
+    /// <summary>宠物窗显隐（与托盘/桌宠菜单双向同步；隐藏不退出进程）。</summary>
+    [ObservableProperty]
+    private bool _isPetVisible = true;
+
+    /// <summary>每日轻问展示上限输入（1–10，非法值不回调）。</summary>
+    [ObservableProperty]
+    private string _nudgeDailyLimitText = "3";
+
+    /// <summary>免打扰时段开关。</summary>
+    [ObservableProperty]
+    private bool _isQuietHoursEnabled = true;
+
+    /// <summary>免打扰开始（HH:mm）。</summary>
+    [ObservableProperty]
+    private string _quietStartText = "23:00";
+
+    /// <summary>免打扰结束（HH:mm）。</summary>
+    [ObservableProperty]
+    private string _quietEndText = "07:00";
 
     [ObservableProperty]
     private bool _isClickThrough;
@@ -95,6 +122,16 @@ public partial class MainViewModel : ObservableObject
 
     partial void OnIsNudgeEnabledChanged(bool value) => _onNudgeChanged(value);
 
+    partial void OnIsPetVisibleChanged(bool value) => _onPetVisibleChanged(value);
+
+    partial void OnNudgeDailyLimitTextChanged(string value) => NotifyNudgeDisplay();
+
+    partial void OnIsQuietHoursEnabledChanged(bool value) => NotifyNudgeDisplay();
+
+    partial void OnQuietStartTextChanged(string value) => NotifyNudgeDisplay();
+
+    partial void OnQuietEndTextChanged(string value) => NotifyNudgeDisplay();
+
     partial void OnIsClickThroughChanged(bool value) => _onClickThroughChanged(value);
 
     partial void OnFocusMinutesTextChanged(string value) => NotifyPomodoroMinutes();
@@ -129,6 +166,20 @@ public partial class MainViewModel : ObservableObject
             && focus is >= 1 and <= 120 && breakMinutes is >= 1 and <= 120)
         {
             _onPomodoroMinutesChanged(focus, breakMinutes);
+        }
+    }
+
+    // 上限 1–10 且两个时刻都能按 HH:mm 解析时才回调（输入过程中不完整不触发）
+    private void NotifyNudgeDisplay()
+    {
+        if (int.TryParse(NudgeDailyLimitText, out var limit) && limit is >= 1 and <= 10
+            && TimeOnly.TryParseExact(QuietStartText.Trim(), "HH:mm", CultureInfo.InvariantCulture,
+                DateTimeStyles.None, out _)
+            && TimeOnly.TryParseExact(QuietEndText.Trim(), "HH:mm", CultureInfo.InvariantCulture,
+                DateTimeStyles.None, out _))
+        {
+            _onNudgeDisplayChanged(limit, IsQuietHoursEnabled,
+                QuietStartText.Trim(), QuietEndText.Trim());
         }
     }
 

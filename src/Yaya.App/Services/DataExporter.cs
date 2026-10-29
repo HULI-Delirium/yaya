@@ -28,6 +28,12 @@ public static class DataExporter
             MonitoringEnabled = settings.MonitoringEnabled,
             NudgeEnabled = settings.NudgeEnabled,
             ClickThrough = settings.ClickThrough,
+            PetVisible = settings.PetVisible,
+            HasCompletedOnboarding = settings.HasCompletedOnboarding,
+            NudgeDailyLimit = settings.NudgeDailyLimit,
+            QuietHoursEnabled = settings.QuietHoursEnabled,
+            QuietStart = settings.QuietStart,
+            QuietEnd = settings.QuietEnd,
             FocusMinutes = settings.FocusMinutes,
             BreakMinutes = settings.BreakMinutes,
             Llm = settings.Llm with { ApiKey = string.Empty },   // 红线：导出剔除 api_key

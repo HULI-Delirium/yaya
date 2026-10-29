@@ -14,8 +14,42 @@
         </Storyboard>
     </Window.Resources>
 
-    <!-- 窗口 200x360：底部 200x200 宠物区，上方 160px 透明区留给气泡 -->
-    <Grid Width="200" Height="360">
+    <!-- 窗口 200x360：底部 200x200 宠物区，上方 160px 透明区留给状态条与气泡 -->
+    <Grid x:Name="RootGrid" Width="200" Height="360">
+        <!-- 桌宠菜单：右键任意位置可开；左键单击（≤4px、≤300ms）由代码打开同一菜单。
+             菜单只抛事件，具体行为（番茄/复盘/历史/设置/显隐/退出）由 App 层接线 -->
+        <Grid.ContextMenu>
+            <ContextMenu x:Name="PetMenu">
+                <MenuItem x:Name="PetPomodoroMenuItem" Header="开始专注 25 分钟"
+                          Click="OnMenuTogglePomodoro" />
+                <Separator />
+                <MenuItem Header="今日复盘…" Click="OnMenuDailyReport" />
+                <MenuItem Header="本周报告…" Click="OnMenuWeeklyReport" />
+                <MenuItem Header="历史记录…" Click="OnMenuHistory" />
+                <MenuItem Header="设置…" Click="OnMenuSettings" />
+                <MenuItem x:Name="PetVisibilityMenuItem" Header="隐藏宠物"
+                          Click="OnMenuTogglePetVisibility" />
+                <Separator />
+                <MenuItem Header="退出" Click="OnMenuExit" />
+            </ContextMenu>
+        </Grid.ContextMenu>
+
+        <!-- 番茄状态条：200x22，无番茄时隐藏（不占位、不挡宠物）；不参与点击/拖动 -->
+        <Border Height="22" Width="150" CornerRadius="11" Background="#E62F6B3F"
+                VerticalAlignment="Top" HorizontalAlignment="Center" IsHitTestVisible="False">
+            <Border.Style>
+                <Style TargetType="Border">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsPomodoroStatusVisible}" Value="True">
+                            <Setter Property="Visibility" Value="Visible" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Border.Style>
+            <TextBlock Text="{Binding PomodoroStatusText}" Foreground="White" FontSize="12"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+        </Border>
         <!-- 宠物区：三层变换（倾倒/摇摆/呼吸）同以盆底中点为锚；拖动也只由本区触发 -->
         <Grid x:Name="PetRoot" Width="200" Height="200" VerticalAlignment="Bottom"
               RenderTransformOrigin="0.5,0.751">
@@ -135,7 +169,7 @@
         </Grid>
 
         <!-- 轻干预气泡：常驻透明区（Opacity 由 DataTrigger 驱动，0.3s 淡入/淡出） -->
-        <Border VerticalAlignment="Top" Margin="6,10,6,0"
+        <Border VerticalAlignment="Top" Margin="6,30,6,0"
                 Background="#D9FFFFFF" CornerRadius="8" Padding="8"
                 IsHitTestVisible="{Binding NudgeVisible}">
             <Border.Style>

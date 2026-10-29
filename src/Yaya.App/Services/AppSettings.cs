@@ -22,6 +22,30 @@ public sealed class AppSettings
     /// <summary>宠物窗鼠标穿透。</summary>
     public bool ClickThrough { get; set; }
 
+    /// <summary>宠物窗是否显示；隐藏后进程与采集继续，托盘/桌宠菜单可恢复。</summary>
+    public bool PetVisible { get; set; } = true;
+
+    /// <summary>首次运行引导是否已完成（关闭欢迎窗即写 true，之后不再弹）。</summary>
+    public bool HasCompletedOnboarding { get; set; }
+
+    /// <summary>每日轻问展示上限（1–10，应用时夹紧；只过滤展示，Core 冷却不变）。</summary>
+    public int NudgeDailyLimit { get; set; } = 3;
+
+    /// <summary>免打扰时段开关（默认开，23:00–07:00；时段内不弹轻问气泡）。</summary>
+    public bool QuietHoursEnabled { get; set; } = true;
+
+    /// <summary>免打扰开始时刻（HH:mm；支持跨零点，如 23:00–07:00）。</summary>
+    public string QuietStart { get; set; } = "23:00";
+
+    /// <summary>免打扰结束时刻（HH:mm）。</summary>
+    public string QuietEnd { get; set; } = "07:00";
+
+    /// <summary>轻问展示计数所属本地日期（yyyy-MM-dd；跨天归零）。</summary>
+    public string NudgeCountDate { get; set; } = string.Empty;
+
+    /// <summary>当日已展示的轻问次数（持久化，重启不重置）。</summary>
+    public int NudgeCountToday { get; set; }
+
     /// <summary>番茄钟专注时长（分钟，1–120，应用时夹紧）。</summary>
     public int FocusMinutes { get; set; } = 25;
 

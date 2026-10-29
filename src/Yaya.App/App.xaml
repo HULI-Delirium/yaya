@@ -37,10 +37,14 @@
                         MenuActivation="LeftOrRightClick">
             <tb:TaskbarIcon.ContextMenu>
                 <ContextMenu>
+                    <MenuItem x:Name="TrayPomodoroItem" Header="开始专注 25 分钟" Click="TrayMenuTogglePomodoro" />
+                    <Separator />
                     <MenuItem x:Name="TrayToggleMonitoringItem" Header="暂停采集" Click="TrayMenuToggleMonitoring" />
                     <MenuItem Header="设置…" Click="TrayMenuShowSettings" />
                     <MenuItem Header="今日复盘…" Click="TrayMenuShowReport" />
                     <MenuItem Header="本周报告…" Click="TrayMenuShowWeeklyReport" />
+                    <MenuItem Header="历史记录…" Click="TrayMenuShowHistory" />
+                    <MenuItem x:Name="TrayPetVisibilityItem" Header="隐藏宠物" Click="TrayMenuTogglePetVisibility" />
                     <Separator />
                     <MenuItem Header="一键清空本地数据" Click="TrayMenuClearData" />
                     <MenuItem Header="退出" Click="TrayMenuExit" />

@@ -1,7 +1,7 @@
 <Window x:Class="Yaya.App.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="芽芽 · 设置" Width="400" Height="520"
+        Title="芽芽 · 设置" Width="400" Height="600"
         WindowStartupLocation="CenterScreen"
         ResizeMode="CanMinimize"
         Loaded="OnLoaded">
@@ -14,7 +14,23 @@
                       Margin="0,12,0,0" />
             <CheckBox Content="提醒（游离时气泡询问）" IsChecked="{Binding IsNudgeEnabled}"
                       Margin="0,8,0,0" />
-            <CheckBox Content="宠物窗鼠标穿透（不可拖动）" IsChecked="{Binding IsClickThrough}"
+            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                <TextBlock Text="每日提醒上限：" VerticalAlignment="Center" />
+                <TextBox Text="{Binding NudgeDailyLimitText, UpdateSourceTrigger=PropertyChanged}" Width="40" />
+                <TextBlock Text=" 次（1–10）" VerticalAlignment="Center" />
+            </StackPanel>
+            <CheckBox Content="免打扰时段（时段内不弹气泡）" IsChecked="{Binding IsQuietHoursEnabled}"
+                      Margin="0,8,0,0" />
+            <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                <TextBlock Text="从 " VerticalAlignment="Center" />
+                <TextBox Text="{Binding QuietStartText, UpdateSourceTrigger=PropertyChanged}" Width="52" />
+                <TextBlock Text=" 到 " VerticalAlignment="Center" />
+                <TextBox Text="{Binding QuietEndText, UpdateSourceTrigger=PropertyChanged}" Width="52" />
+                <TextBlock Text="（HH:mm）" VerticalAlignment="Center" Foreground="Gray" />
+            </StackPanel>
+            <CheckBox Content="显示宠物（关闭后仍可从托盘恢复）" IsChecked="{Binding IsPetVisible}"
+                      Margin="0,8,0,0" />
+            <CheckBox Content="宠物窗鼠标穿透（不可拖动，菜单也不可用）" IsChecked="{Binding IsClickThrough}"
                       Margin="0,8,0,0" />
             <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
                 <TextBlock Text="专注分钟：" VerticalAlignment="Center" />

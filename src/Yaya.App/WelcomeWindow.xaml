@@ -1,0 +1,32 @@
+<Window x:Class="Yaya.App.WelcomeWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="芽芽 · 欢迎" Width="420" Height="380"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize">
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="欢迎来到芽芽" FontSize="20" FontWeight="Bold" />
+        <TextBlock Grid.Row="1" Margin="0,6,0,0" FontSize="12" Foreground="#FF555555"
+                   TextWrapping="Wrap"
+                   Text="一盆会跟着你学习状态变化的桌面植物：只在本机判断，只给低打扰提醒。" />
+
+        <Border Grid.Row="2" Margin="0,12,0,0" Background="#FFF6F8F5" CornerRadius="6" Padding="10">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <TextBlock x:Name="UsageText" FontSize="12" LineHeight="18" TextWrapping="Wrap" />
+            </ScrollViewer>
+        </Border>
+
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
+            <Button Content="先逛逛" Padding="16,5" Click="OnBrowseFirst" />
+            <Button Content="开始第一次专注" Padding="16,5" Margin="8,0,0,0"
+                    IsDefault="True" Click="OnStartFocusFirst" />
+        </StackPanel>
+    </Grid>
+</Window>

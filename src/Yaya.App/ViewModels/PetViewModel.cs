@@ -54,6 +54,14 @@ public partial class PetViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _nudgeText = string.Empty;
 
+    /// <summary>番茄状态条是否可见（无番茄时隐藏，不占视觉）。</summary>
+    [ObservableProperty]
+    private bool _isPomodoroStatusVisible;
+
+    /// <summary>番茄状态条文字：专注 24:31 / 休息 04:12。</summary>
+    [ObservableProperty]
+    private string _pomodoroStatusText = string.Empty;
+
     private readonly DispatcherTimer _blinkTimer;
     private readonly DispatcherTimer _blinkRevertTimer;
     private readonly DispatcherTimer _transitionGuardTimer;
@@ -157,6 +165,25 @@ public partial class PetViewModel : ObservableObject, IDisposable
     /// <summary>开发期调试入口（冒烟验收热键 F6/F7 用，DEBUG_HOTKEYS 开启时可用）。</summary>
     public void DevNavigate(FocusState simulated) =>
         OnFocusTransition(new FocusTransition(FocusState.Uncertain, simulated, false, null));
+
+    /// <summary>
+    /// 番茄状态条（App 每秒刷新）：相位 + 剩余时间；无番茄时隐藏。
+    /// 状态条只是展示，不参与 Core 判定（相位经 PomodoroService 注入状态机）。
+    /// </summary>
+    public void SetPomodoroStatus(PomodoroPhase phase, TimeSpan remaining)
+    {
+        if (phase == PomodoroPhase.None)
+        {
+            IsPomodoroStatusVisible = false;
+            PomodoroStatusText = string.Empty;
+            return;
+        }
+
+        var totalSeconds = Math.Max(0, (int)Math.Ceiling(remaining.TotalSeconds));
+        var label = phase == PomodoroPhase.Break ? "休息" : "专注";
+        PomodoroStatusText = $"{label} {totalSeconds / 60:00}:{totalSeconds % 60:00}";
+        IsPomodoroStatusVisible = true;
+    }
 
     /// <summary>番茄钟休息相位：Relaxed 大幅摇摆（Alert 优先，休息中本就不会有 Alert）。</summary>
     public void SetRelaxed(bool relaxed)
